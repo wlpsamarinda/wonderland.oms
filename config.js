@@ -11,4 +11,4 @@
  * Tanpa langkah ini, aplikasi GitHub Pages TIDAK bisa terhubung ke database
  * Google Sheets (CORS). Pola yang dipakai: iframe proxy + postMessage.
  *************************************************************************************************/
-var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/ISI_DENGAN_URL_EXEC_ANDA/exec';
+var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyD0VqcTCzQqmXgemHlYU675u08ze7EpQsUP1PVacGWkvZPW8hzBbUtB0R0ef7_zL7f6g/exec';
