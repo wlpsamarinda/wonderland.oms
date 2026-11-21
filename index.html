@@ -1459,7 +1459,7 @@ function saveAttendanceGrid(){
 
 function openAttendanceForm(){
   ensureEmployeesCache().then(function(){
-    var options = CACHE.employees.map(function(e){ return '<option value="'+e.Employee_ID+'">'+esc(e.Name)+'</option>'; }).join('');
+    var options = activeEmps_().map(function(e){ return '<option value="'+e.Employee_ID+'">'+esc(e.Name)+'</option>'; }).join('');
     var body = '<div class="formrow"><label>Karyawan</label><select class="input" id="afEmp">'+options+'</select></div>' +
       '<div class="formrow"><label>Tanggal</label><input type="date" class="input" id="afDate" value="'+localDateStr()+'"></div>' +
       '<div class="formrow"><label>Status</label><select class="input" id="afStatus">' +
@@ -1487,7 +1487,7 @@ function openAttendanceRecap(){
     return call('getBookPeriod', STATE.token);
   }).then(function(period){
     var isMgmt = ['OWNER','MANAGER','SUPERVISOR','ADMIN'].indexOf(STATE.role) !== -1;
-    var options = isMgmt ? CACHE.employees.map(function(e){ return '<option value="'+e.Employee_ID+'">'+esc(e.Name)+'</option>'; }).join('') : '';
+    var options = isMgmt ? activeEmps_().map(function(e){ return '<option value="'+e.Employee_ID+'">'+esc(e.Name)+'</option>'; }).join('') : '';
     var body = (isMgmt ? '<div class="formrow"><label>Karyawan</label><select class="input" id="rcEmp">'+options+'</select></div>' : '') +
       '<div class="formrow"><label>Dari Tanggal</label><input type="date" class="input" id="rcStart" value="'+period.start+'"></div>' +
       '<div class="formrow"><label>Sampai Tanggal</label><input type="date" class="input" id="rcEnd" value="'+period.end+'"></div>' +
@@ -1692,7 +1692,7 @@ function renderShiftGrid(){
   document.getElementById('shiftTableWrap').innerHTML = html;
 }
 function empOptionsExclude(selectedId, excludeId){
-  return '<option value="">-</option>' + CACHE.employees.filter(function(e){ return String(e.Employee_ID)!==String(excludeId); })
+  return '<option value="">-</option>' + activeEmps_().filter(function(e){ return String(e.Employee_ID)!==String(excludeId); })
     .map(function(e){ return '<option value="'+e.Employee_ID+'"'+(String(e.Employee_ID)===String(selectedId)?' selected':'')+'>'+esc(e.Name)+'</option>'; }).join('');
 }
 function onShiftCellClick(employeeId, idx){
@@ -2203,6 +2203,10 @@ function runExport(reportKey){
 /*************************************************************************************************
  * SHARED CACHE HELPERS
  *************************************************************************************************/
+/** Karyawan berstatus INACTIVE tidak boleh muncul di field/dropdown form mana pun. CACHE.employees tetap berisi semua
+ *  karyawan (dipakai untuk mencari nama/departemen pada data lama); gunakan activeEmps_() untuk pilihan di form. */
+function isActiveEmp_(e){ return String((e && e.Status) || 'ACTIVE').toUpperCase() === 'ACTIVE'; }
+function activeEmps_(){ return (CACHE.employees || []).filter(isActiveEmp_); }
 function ensureEmployeesCache(){
   return call('getEmployees', STATE.token).then(function(list){ CACHE.employees = list; });
 }
@@ -2666,7 +2670,7 @@ function dgUniq_(list, key){
   return out.sort();
 }
 function dgEmpOptions_(){
-  return (CACHE.employees || []).map(function(e){ return { v: String(e.Employee_ID), l: e.Name }; });
+  return activeEmps_().map(function(e){ return { v: String(e.Employee_ID), l: e.Name }; });
 }
 
 /* ------------------------------- EMPLOYEES ------------------------------- */
@@ -2679,8 +2683,8 @@ function openEmployeeForm(employeeId){
     columns: [
       { key: 'Employee_Code', label: 'Kode', type: 'text', w: 120, placeholder: 'Otomatis', hint: 'Kosongkan agar kode dibuat otomatis.' },
       { key: 'Name', label: 'Nama', type: 'text', required: true, w: 220 },
-      { key: 'Department', label: 'Departemen', type: 'text', w: 170, suggest: function(){ return dgUniq_(CACHE.employees, 'Department'); } },
-      { key: 'Position', label: 'Posisi', type: 'text', w: 170, suggest: function(){ return dgUniq_(CACHE.employees, 'Position'); } },
+      { key: 'Department', label: 'Departemen', type: 'text', w: 170, suggest: function(){ return dgUniq_(activeEmps_(), 'Department'); } },
+      { key: 'Position', label: 'Posisi', type: 'text', w: 170, suggest: function(){ return dgUniq_(activeEmps_(), 'Position'); } },
       { key: 'Phone', label: 'Telepon', type: 'text', w: 150 },
       { key: 'Email', label: 'Email', type: 'text', w: 210 },
       { key: 'Join_Date', label: 'Tgl Bergabung', type: 'date', w: 160, default: function(){ return todayStr_(); } }
@@ -2737,6 +2741,8 @@ function openTaskMasterForm(taskId){
   }
 }
 function openTaskMasterGrid_(existing, raci){
+  var activeIds = {}; activeEmps_().forEach(function(e){ activeIds[String(e.Employee_ID)] = true; });
+  var onlyActive = function(id){ return activeIds[String(id)] ? String(id) : ''; };
   var days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'].map(function(d, i){ return { v: String(i + 1), l: d }; });
   var empBlank = '—';
   var picHook = function(vals, set){
@@ -2747,16 +2753,16 @@ function openTaskMasterGrid_(existing, raci){
   if(existing){
     var st = existing.Schedule_Type || 'DAILY';
     initial = [{
-      Task_Name: existing.Task_Name, Task_Item: existing.Task_Item, Primary_PIC_ID: String(existing.Primary_PIC_ID || ''), Backup_PIC_ID: String(existing.Backup_PIC_ID || ''),
+      Task_Name: existing.Task_Name, Task_Item: existing.Task_Item, Primary_PIC_ID: onlyActive(existing.Primary_PIC_ID), Backup_PIC_ID: onlyActive(existing.Backup_PIC_ID),
       Department: existing.Department, Position: existing.Position,
       Schedule_Type: st, DayVal: st === 'WEEKLY' ? String(existing.Day_Of_Week || 1) : (st === 'MONTHLY' ? String(existing.Day_Of_Month || 1) : ''),
       Task_Type: existing.Task_Type || 'RECURRING', Frequency: existing.Frequency || 'DAILY', Task_Category: existing.Task_Category || '',
       Start_Time: existing.Start_Time, Due_Time: existing.Due_Time,
       Required: dgBool_(existing.Required), Photo_Required: dgBool_(existing.Photo_Required), Sort_Order: existing.Sort_Order || 0,
       Description: existing.Description, Output: existing.Output,
-      Accountable: raci && raci.accountable ? String(raci.accountable.Employee_ID) : '',
-      Consulted: raci ? raci.consulted.map(function(c){ return String(c.Employee_ID); }) : [],
-      Informed: raci ? raci.informed.map(function(c){ return String(c.Employee_ID); }) : [],
+      Accountable: raci && raci.accountable ? onlyActive(raci.accountable.Employee_ID) : '',
+      Consulted: raci ? raci.consulted.map(function(c){ return onlyActive(c.Employee_ID); }).filter(Boolean) : [],
+      Informed: raci ? raci.informed.map(function(c){ return onlyActive(c.Employee_ID); }).filter(Boolean) : [],
       Authority_Level: existing.Authority_Level || '', Authority_Limit: existing.Authority_Limit, Spending_Limit: existing.Spending_Limit,
       Escalation_Enabled: dgBool_(existing.Escalation_Enabled), Escalation_Trigger: existing.Escalation_Trigger,
       Escalation_To: existing.Escalation_To || 'MANAGER', Escalation_Time_Limit: existing.Escalation_Time_Limit,
@@ -2954,10 +2960,10 @@ function deleteSelectedTM(){
   });
 }
 function empOptions(selectedId){
-  return '<option value="">-</option>' + CACHE.employees.map(function(e){ return '<option value="'+e.Employee_ID+'"'+(String(e.Employee_ID)===String(selectedId)?' selected':'')+'>'+esc(e.Name)+'</option>'; }).join('');
+  return '<option value="">-</option>' + activeEmps_().map(function(e){ return '<option value="'+e.Employee_ID+'"'+(String(e.Employee_ID)===String(selectedId)?' selected':'')+'>'+esc(e.Name)+'</option>'; }).join('');
 }
 function empOptionsMulti(){
-  return CACHE.employees.map(function(e){ return '<option value="'+e.Employee_ID+'">'+esc(e.Name)+'</option>'; }).join('');
+  return activeEmps_().map(function(e){ return '<option value="'+e.Employee_ID+'">'+esc(e.Name)+'</option>'; }).join('');
 }
 function deactivateTM(taskId){
   confirmAction('Nonaktifkan task master ini?', function(){
@@ -3487,7 +3493,7 @@ RENDERERS.okr = function(){
   document.getElementById('content').innerHTML = html;
   ensureEmployeesCache().then(function(){
     var sel = document.getElementById('okrEmpFilter');
-    sel.innerHTML = '<option value="">- Pilih Karyawan -</option><option value="__ORG__" '+(OKR_STATE.employeeId==='__ORG__'?'selected':'')+'>[Objective Perusahaan & Departemen]</option>' + CACHE.employees.map(function(e){
+    sel.innerHTML = '<option value="">- Pilih Karyawan -</option><option value="__ORG__" '+(OKR_STATE.employeeId==='__ORG__'?'selected':'')+'>[Objective Perusahaan & Departemen]</option>' + activeEmps_().map(function(e){
       return '<option value="'+esc(e.Employee_ID)+'" '+(e.Employee_ID===OKR_STATE.employeeId?'selected':'')+'>'+esc(e.Name)+' ('+esc(e.Position||'-')+')</option>';
     }).join('');
     document.getElementById('okrPeriodFilter').addEventListener('change', function(){ OKR_STATE.period = this.value.trim(); });
@@ -3538,7 +3544,7 @@ function ensureOkrMetricLabels_(){
 }
 function openObjectiveForm(){
   ensureEmployeesCache().then(function(){
-    var empOptions = CACHE.employees.map(function(e){ return '<option value="'+esc(e.Employee_ID)+'">'+esc(e.Name)+'</option>'; }).join('');
+    var empOptions = activeEmps_().map(function(e){ return '<option value="'+esc(e.Employee_ID)+'">'+esc(e.Name)+'</option>'; }).join('');
     var deptOptions = perfDeptList_().map(function(d){ return '<option value="'+esc(d)+'">'+esc(d)+'</option>'; }).join('');
     var body = '<div class="formrow"><label>Level Objective</label><select class="input" id="objLevel" onchange="toggleObjLevel_()"><option value="INDIVIDUAL">Individu (karyawan)</option><option value="DEPARTMENT">Departemen</option><option value="COMPANY">Perusahaan</option></select></div>' +
       '<div class="formrow" id="objEmpRow"><label>Karyawan</label><select class="input" id="objEmp">'+empOptions+'</select></div>' +
@@ -3657,7 +3663,7 @@ function perfScoreColor_(score, threshold){
 }
 function perfDeptList_(){
   var seen = {}, out = [];
-  (CACHE.employees||[]).forEach(function(e){
+  activeEmps_().forEach(function(e){
     var d = String(e.Department||'').trim();
     if(d && !seen[d.toLowerCase()]){ seen[d.toLowerCase()] = true; out.push(d); }
   });
@@ -4017,7 +4023,7 @@ function loadPdcaPlans(){
 }
 function openPdcaPlanForm(i){
   var p = PDCAP_ROWS[i];
-  var picOpts = '<option value="">- Pilih PIC -</option>' + CACHE.employees.map(function(e){
+  var picOpts = '<option value="">- Pilih PIC -</option>' + activeEmps_().map(function(e){
     return '<option value="'+esc(e.Employee_ID)+'" '+(e.Employee_ID===p.PIC_ID?'selected':'')+'>'+esc(e.Name)+'</option>';
   }).join('');
   var body = '<p class="muted" style="font-size:12px;">'+esc(p.Entity_Name)+' &middot; '+esc(p.KPI_Name)+' &middot; '+esc(p.Period)+' &middot; capaian '+esc(p.Achievement_Pct)+'%</p>' +
@@ -4109,7 +4115,7 @@ function openRaciEditor(taskId){
   Promise.all([call('getRaciForTask', STATE.token, taskId), ensureEmployeesCache()]).then(function(res){
     var raci = res[0];
     var empOptions = function(selectedIds){
-      return CACHE.employees.map(function(e){
+      return activeEmps_().map(function(e){
         return '<option value="'+esc(e.Employee_ID)+'" '+(selectedIds.indexOf(e.Employee_ID)!==-1?'selected':'')+'>'+esc(e.Name)+'</option>';
       }).join('');
     };
