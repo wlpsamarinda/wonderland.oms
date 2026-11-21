@@ -7,28 +7,21 @@ dengan Google Sheets tetap sebagai database lewat Google Apps Script.
 ## Arsitektur
 
 ```
-HP (PWA terinstall, GitHub Pages)  --postMessage-->  iframe proxy tersembunyi
-                                                          | google.script.run
-                                                    Apps Script Web App
-                                                          |
-                                                    Google Sheets (database)
+HP (PWA terinstall, GitHub Pages)  --fetch POST (JSON)-->  Apps Script Web App (doPost)
+                                                                  |
+                                                            Google Sheets (database)
 ```
 
-Browser tidak mengizinkan situs GitHub memanggil Apps Script langsung (CORS),
-jadi dipakai pola *iframe proxy*: halaman Apps Script kecil (`?pwa=proxy`) berjalan
-di iframe tersembunyi, menjalankan semua fungsi `Code.gs` apa adanya, dan hasilnya
-dikirim balik ke halaman utama lewat `postMessage`.
+Frontend memanggil Web App lewat `fetch` POST dengan `Content-Type: text/plain` (tanpa preflight CORS).
+`doPost` di Code.gs hanya mengizinkan fungsi di `API_WHITELIST_`.
 
-## Langkah 1 - Update Google Apps Script (backend tetap sama)
+## Langkah 1 - Update Google Apps Script
 
-1. Buka project Apps Script Anda (yang berisi `Code.gs`).
-2. Buka file **`code-gs-pwa-addition.gs`** di repo ini, ikuti 2 langkah di dalamnya:
-   - tambahkan blok `if (pwaParam === 'proxy') {...}` di `doGet()`
-   - tempel fungsi `getPwaProxyHtml_()` di bawah file
-3. **Deploy > Manage deployments > klik pensil > Version: New version > Deploy**.
+1. Ganti isi project Apps Script dengan `Code.gs` terbaru (sudah berisi `doPost`).
+2. **Deploy > Manage deployments > pensil > Version: New version > Deploy**.
    - Execute as: **Me**
-   - Who has access: **Anyone** (wajib)
-4. Salin URL yang berakhiran `/exec`.
+   - Who has access: **Anyone** (bukan "Anyone with Google account")
+3. URL `/exec` sudah diisi di `config.js`. Tes: buka `URL/exec?pwa=manifest` di browser, harus muncul JSON.
 
 ## Langkah 2 - Deploy ke GitHub Pages
 

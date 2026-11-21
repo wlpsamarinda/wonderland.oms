@@ -1,76 +1,45 @@
 /*************************************************************************************************
  * GAS_API - jembatan antara PWA statis (GitHub Pages) dan Google Apps Script.
  *
- * google.script.run HANYA bisa dipakai di halaman yang disajikan Apps Script
- * sendiri. Karena frontend sekarang di-host statis di GitHub Pages, kita memakai
- * pola "iframe proxy":
- *   - iframe tersembunyi memuat Web App Apps Script (?pwa=proxy)
- *   - iframe itu menjalankan google.script.run secara internal
- *   - hasilnya dikirim balik ke halaman induk lewat postMessage
- * Semua fungsi backend (Code.gs) bisa dipanggil apa adanya lewat invoke().
+ * Memakai fetch POST langsung ke Web App (doPost di Code.gs). Content-Type sengaja text/plain
+ * agar request tergolong "simple request" (tanpa preflight CORS, yang tidak didukung Apps Script).
+ * Antarmuka tetap sama: GAS_API.invoke(namaFungsi, [args]) -> Promise<respons>.
  *************************************************************************************************/
 var GAS_API = (function(){
-  var iframe = null, ready = false, seq = 0, pending = {}, loadPromise = null;
-
-  function onMessage(e){
-    var d = e.data || {};
-    if(d.type === 'gs-proxy-ready'){ ready = true; return; }
-    if(d.type === 'gs-result'){
-      var p = pending[d.id];
-      if(p){
-        delete pending[d.id];
-        if(d.ok){ p.resolve(d.res); } else { p.reject(new Error(d.error || 'Server error')); }
-      }
-    }
-  }
-
-  function ensureIframe(){
-    if(ready && iframe){ return Promise.resolve(); }
-    if(loadPromise){ return loadPromise; }
-    loadPromise = new Promise(function(resolve, reject){
-      if(!window.APPS_SCRIPT_URL || APPS_SCRIPT_URL.indexOf('https://script.google.com/macros/s/') !== 0){
-        reject(new Error('URL Web App Apps Script belum diatur di config.js. Ikuti petunjuk di file tersebut.'));
-        return;
-      }
-      window.addEventListener('message', onMessage);
-      iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups');
-      var timer = setTimeout(function(){
-        reject(new Error('Tidak bisa menghubungi server Apps Script. Periksa URL di config.js, koneksi internet, dan pastikan Web App sudah di-deploy dengan akses "Anyone".'));
-      }, 25000);
-      iframe.addEventListener('load', function(){
-        var wait = setInterval(function(){
-          if(ready){ clearInterval(wait); clearTimeout(timer); resolve(); }
-        }, 200);
-        setTimeout(function(){ clearInterval(wait); }, 20000);
-      });
-      iframe.src = APPS_SCRIPT_URL + '?pwa=proxy';
-      document.body.appendChild(iframe);
-    });
-    return loadPromise;
-  }
+  var TIMEOUT_MS = 60000;
 
   function invoke(fnName, args){
-    return ensureIframe().then(function(){
-      return new Promise(function(resolve, reject){
-        var id = ++seq;
-        pending[id] = { resolve: resolve, reject: reject };
-        var timer = setTimeout(function(){
-          if(pending[id]){
-            delete pending[id];
-            reject(new Error('Permintaan ke server terlalu lama (timeout). Periksa koneksi internet Anda.'));
+    return new Promise(function(resolve, reject){
+      if(!window.APPS_SCRIPT_URL || APPS_SCRIPT_URL.indexOf('https://script.google.com/macros/s/') !== 0){
+        reject(new Error('URL Web App Apps Script belum diatur di config.js.'));
+        return;
+      }
+      var controller = ('AbortController' in window) ? new AbortController() : null;
+      var timer = setTimeout(function(){
+        if(controller){ controller.abort(); }
+        reject(new Error('Permintaan ke server terlalu lama (timeout). Periksa koneksi internet Anda.'));
+      }, TIMEOUT_MS);
+
+      fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ fn: fnName, args: args || [] }),
+        redirect: 'follow',
+        signal: controller ? controller.signal : undefined
+      }).then(function(res){
+        return res.text().then(function(text){
+          clearTimeout(timer);
+          var data;
+          try { data = JSON.parse(text); }
+          catch(e){
+            reject(new Error('Server mengembalikan respons tidak valid. Pastikan Web App sudah di-deploy versi terbaru dengan akses "Anyone" (bukan "Anyone with Google account").'));
+            return;
           }
-        }, 45000);
-        var origResolve = pending[id].resolve, origReject = pending[id].reject;
-        pending[id].resolve = function(v){ clearTimeout(timer); origResolve(v); };
-        pending[id].reject = function(e){ clearTimeout(timer); origReject(e); };
-        try {
-          iframe.contentWindow.postMessage({ type: 'gs-call', id: id, fn: fnName, args: args || [] }, '*');
-        } catch(err){
-          delete pending[id];
-          reject(new Error('Gagal mengirim permintaan ke server: ' + (err && err.message ? err.message : err)));
-        }
+          resolve(data);
+        });
+      }).catch(function(err){
+        clearTimeout(timer);
+        reject(new Error('Tidak bisa menghubungi server Apps Script. Periksa koneksi internet, URL di config.js, dan pastikan Web App di-deploy dengan akses "Anyone".'));
       });
     });
   }
