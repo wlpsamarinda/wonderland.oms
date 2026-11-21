@@ -296,6 +296,44 @@ table.tbl tr:hover td{background:#fafbff;}
   body.has-bottom-nav .toast-container{top:auto; bottom:calc(76px + env(safe-area-inset-bottom));}
   body.has-bottom-nav #pwaInstallBanner{bottom:calc(64px + env(safe-area-inset-bottom));}
 }
+
+/* ---------- DATAGRID (form input berbentuk tabel) ---------- */
+.modal.wide{width:min(1280px,98vw);}
+.dg-top{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;}
+.dg-sub{flex:1; min-width:220px; font-size:13px; color:var(--muted);}
+.dg-wrap{overflow:auto; max-height:calc(88vh - 210px); border:1px solid var(--border); border-radius:var(--radius); background:var(--card); -webkit-overflow-scrolling:touch;}
+table.dg{--dg-head:#f7f9fc; border-collapse:separate; border-spacing:0; font-size:13px; min-width:100%;}
+html[data-theme="dark"] table.dg{--dg-head:#232a3d;}
+.dg th{position:sticky; top:0; z-index:3; background:var(--dg-head); color:var(--muted); font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; text-align:left; padding:11px 10px; border-bottom:1px solid var(--border); border-right:1px solid var(--border); white-space:nowrap;}
+.dg.has-groups th.dg-colh{top:30px;}
+.dg th.dg-gh{height:30px; padding:6px 10px; font-size:10.5px; color:var(--accent); background:var(--dg-head); border-bottom:1px solid var(--border);}
+.dg td{padding:6px 5px; border-bottom:1px solid var(--border); border-right:1px solid var(--border); vertical-align:top; background:var(--card);}
+.dg th.dg-no, .dg td.dg-no{position:sticky; left:0; z-index:2; width:44px; min-width:44px; text-align:center; color:var(--muted); font-weight:700; background:var(--dg-head); padding-top:15px;}
+.dg th.dg-no{z-index:4; padding-top:11px;}
+.dg .input{width:100%; box-sizing:border-box; padding:9px 10px; border-radius:8px; min-height:38px; font-family:inherit;}
+.dg select.input{padding-right:4px;}
+.dg textarea.dg-ta{min-height:38px; height:38px; resize:vertical; line-height:1.3;}
+.dg .dg-ro{background:var(--dg-head); color:var(--muted); cursor:default;}
+.dg .dg-none{padding:10px; color:var(--muted); text-align:center;}
+.dg td.dg-tdc{text-align:center;}
+.dg .dg-chk{display:flex; align-items:center; justify-content:center; height:38px; margin:0;}
+.dg .dg-chk input{width:18px; height:18px;}
+.dg .dg-multi{text-align:left; cursor:pointer; color:var(--text); background:var(--card); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.dg .dg-del{width:40px; text-align:center;}
+.dg .dg-x{border:none; background:none; color:var(--muted); font-size:20px; line-height:1; padding:7px 8px; border-radius:6px; cursor:pointer;}
+.dg .dg-x:hover{background:#fde8e7; color:var(--danger);}
+.dg-req{color:var(--danger);}
+.dg-info{color:var(--muted); cursor:help; font-size:12px; text-transform:none;}
+.dg .dg-bad{border-color:var(--danger) !important; box-shadow:0 0 0 2px rgba(224,67,58,.18);}
+.dg tr.dg-saved td{background:rgba(15,157,88,.07);}
+.dg tr.dg-saved .input{opacity:.7;}
+.dg tr.dg-error td.dg-no, .dg .dg-err{color:var(--danger);}
+.dg .dg-ok{color:var(--ok); font-size:16px;}
+.dg tr.dg-saving td{opacity:.65;}
+.dg-pop{position:fixed; z-index:700; background:var(--card); color:var(--text); border:1px solid var(--border); border-radius:10px; box-shadow:0 12px 30px rgba(0,0,0,.22); overflow:auto; padding:4px;}
+.dg-pop label{display:flex; align-items:center; gap:8px; padding:8px 10px; font-size:13px; cursor:pointer; border-radius:6px; margin:0;}
+.dg-pop label:hover{background:rgba(47,128,237,.08);}
+@media(max-width:600px){ .dg-wrap{max-height:calc(100vh - 230px);} .dg-top .btn{flex:1;} }
 .att-grid-wrap{overflow:auto; max-height:70vh; border:1px solid #e5e7ef; border-radius:10px;}
 .att-grid{border-collapse:collapse; font-size:12px; width:100%;}
 .att-grid th, .att-grid td{border:1px solid #e5e7ef; padding:0; text-align:center;}
@@ -677,9 +715,14 @@ function openModal(title, bodyHtml, footHtml){
   document.getElementById('modalTitle').textContent = title;
   document.getElementById('modalBody').innerHTML = bodyHtml;
   document.getElementById('modalFoot').innerHTML = footHtml || '';
+  document.getElementById('modalFoot').style.display = '';
+  document.querySelector('#modalOverlay .modal').classList.remove('wide');
   document.getElementById('modalOverlay').classList.add('active');
 }
-function closeModal(){ document.getElementById('modalOverlay').classList.remove('active'); }
+function closeModal(){
+  if(typeof dgClosePop_ === 'function'){ dgClosePop_(); }
+  document.getElementById('modalOverlay').classList.remove('active');
+}
 
 function confirmAction(message, onConfirm){
   openModal('Konfirmasi', '<div class="confirm-box"><p>'+esc(message)+'</p></div>',
@@ -2171,6 +2214,639 @@ function ensureTaskMasterCache(){
 }
 
 /*************************************************************************************************
+ * DATAGRID - form input berbentuk tabel (banyak baris sekaligus, seperti spreadsheet).
+ * Dipakai oleh Employees, Assets, dan Task Master (mode Tambah = banyak baris, mode Edit = 1 baris).
+ *
+ * cfg = {
+ *   title, subtitle, edit:Boolean, minRows:Number, saveLabel,
+ *   columns:[{ key, label, group, type, required, w, hint, placeholder, default, options, blank,
+ *              suggest, min, max, step, dependsOn, dynamic, onChange }],
+ *   rows:[objek nilai awal] (mode edit),
+ *   save: function(values, rowIndex) -> Promise   (dipanggil per baris, berurutan),
+ *   onDone: function()                             (refresh tabel di belakang modal)
+ * }
+ * type: text | number | date | time | select | check | textarea | multi | readonly | dynamic
+ *************************************************************************************************/
+var DG = null;
+var DG_POP = null;
+
+function dgVal_(v){ return (typeof v === 'function') ? v() : v; }
+function dgOptions_(col){
+  var raw = dgVal_(col.options) || [];
+  return raw.map(function(o){ return (typeof o === 'object') ? o : { v: o, l: o }; });
+}
+function dgEmpty_(v){ return v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length); }
+function dgBool_(v){ return v === true || v === 'TRUE' || v === 'true' || v === 1 || v === '1'; }
+function dgCol_(key){ for(var i=0;i<DG.cfg.columns.length;i++){ if(DG.cfg.columns[i].key === key) return DG.cfg.columns[i]; } return null; }
+function dgRow_(rid){ for(var i=0;i<DG.rows.length;i++){ if(DG.rows[i].id === rid) return DG.rows[i]; } return null; }
+
+/** Konfigurasi sel yang berlaku untuk baris ini (kolom 'dynamic' berubah menurut nilai kolom lain). */
+function dgCell_(col, vals){
+  if(col.type !== 'dynamic') return col;
+  var d = col.dynamic(vals) || { type: 'none' };
+  var o = {}; for(var k in col){ o[k] = col[k]; } for(var k2 in d){ o[k2] = d[k2]; }
+  return o;
+}
+
+function dgNewRow_(src){
+  var vals = {};
+  DG.cfg.columns.forEach(function(c){
+    if(src && src[c.key] !== undefined && src[c.key] !== null){ vals[c.key] = src[c.key]; }
+    else {
+      var d = dgVal_(c.default);
+      vals[c.key] = (d !== undefined) ? d : (c.type === 'multi' ? [] : (c.type === 'check' ? false : ''));
+    }
+  });
+  return { id: 'r' + (++DG.seq), vals: vals, status: 'new', error: '' };
+}
+
+function dgInputHtml_(col, row){
+  var cell = dgCell_(col, row.vals);
+  var k = col.key, v = row.vals[k];
+  var attr = ' data-k="' + esc(k) + '"';
+  var ph = cell.placeholder ? ' placeholder="' + esc(cell.placeholder) + '"' : '';
+  switch(cell.type){
+    case 'none':
+      return '<div class="dg-none">' + esc(cell.text || '—') + '</div>';
+    case 'readonly':
+      return '<input class="input dg-ro" readonly tabindex="-1"' + attr + ' value="' + esc(v) + '"' + ph + '>';
+    case 'check':
+      return '<label class="dg-chk"><input type="checkbox"' + attr + (dgBool_(v) ? ' checked' : '') + '></label>';
+    case 'textarea':
+      return '<textarea class="input dg-ta" rows="1"' + attr + ph + '>' + esc(v) + '</textarea>';
+    case 'select':
+      var opts = dgOptions_(cell), found = false, h = '';
+      if(cell.blank !== undefined){ h += '<option value="">' + esc(cell.blank) + '</option>'; }
+      opts.forEach(function(o){
+        var sel = String(o.v) === String(v); if(sel) found = true;
+        h += '<option value="' + esc(o.v) + '"' + (sel ? ' selected' : '') + '>' + esc(o.l) + '</option>';
+      });
+      // nilai lama yang tidak ada di daftar tetap ditampilkan agar tidak hilang saat edit
+      if(!found && !dgEmpty_(v)){ h += '<option value="' + esc(v) + '" selected>' + esc(v) + '</option>'; }
+      return '<select class="input"' + attr + '>' + h + '</select>';
+    case 'multi':
+      return '<button type="button" class="input dg-multi"' + attr + '>' + esc(dgMultiLabel_(cell, v)) + '</button>';
+    default: // text, number, date, time
+      var type = cell.type === 'number' ? 'number' : (cell.type === 'date' ? 'date' : (cell.type === 'time' ? 'time' : 'text'));
+      var extra = '';
+      if(type === 'number'){
+        extra += ' step="' + (cell.step || 'any') + '"';
+        if(cell.min !== undefined) extra += ' min="' + cell.min + '"';
+        if(cell.max !== undefined) extra += ' max="' + cell.max + '"';
+        extra += ' inputmode="decimal"';
+      }
+      if(type === 'time'){ extra += ' step="60"'; }
+      if(type === 'date' && v){ v = String(v).substring(0, 10); }
+      var list = '';
+      if(cell.suggest){ list = ' list="dgl-' + esc(k) + '"'; }
+      return '<input class="input" type="' + type + '"' + attr + ' value="' + esc(v) + '"' + ph + extra + list + '>';
+  }
+}
+
+function dgMultiLabel_(col, ids){
+  ids = ids || [];
+  if(!ids.length) return 'Pilih…';
+  var names = dgOptions_(col).filter(function(o){ return ids.indexOf(String(o.v)) !== -1; }).map(function(o){ return o.l; });
+  if(names.length === 1) return names[0];
+  return names.length + ' dipilih';
+}
+
+function dgRowHtml_(row, idx){
+  var h = '<tr data-rid="' + row.id + '" class="' + (row.status !== 'new' ? 'dg-' + row.status : '') + '">';
+  h += '<td class="dg-no" title="' + esc(row.error) + '">' + dgNoLabel_(row, idx) + '</td>';
+  DG.cfg.columns.forEach(function(c){
+    h += '<td data-k="' + esc(c.key) + '"' + (c.type === 'check' ? ' class="dg-tdc"' : '') + '>' + dgInputHtml_(c, row) + '</td>';
+  });
+  if(!DG.cfg.edit){ h += '<td class="dg-del"><button type="button" class="dg-x" title="Hapus baris" data-act="del">&times;</button></td>'; }
+  return h + '</tr>';
+}
+function dgNoLabel_(row, idx){
+  if(row.status === 'saved') return '<span class="dg-ok">&#10003;</span>';
+  if(row.status === 'error') return '<span class="dg-err">!</span>';
+  if(row.status === 'saving') return '<span class="dg-spin">&#8230;</span>';
+  return String(idx + 1);
+}
+
+function openDataGrid(cfg){
+  DG = { cfg: cfg, rows: [], seq: 0, busy: false };
+  var n = cfg.rows && cfg.rows.length ? cfg.rows.length : (cfg.minRows || 3);
+  for(var i = 0; i < n; i++){ DG.rows.push(dgNewRow_(cfg.rows ? cfg.rows[i] : null)); }
+
+  var cols = cfg.columns, hasGroups = cols.some(function(c){ return c.group; });
+  var th = '';
+  if(hasGroups){
+    var gh = '<tr class="dg-grow"><th class="dg-no"></th>', i2 = 0;
+    while(i2 < cols.length){
+      var g = cols[i2].group || '', span = 1;
+      while(i2 + span < cols.length && (cols[i2 + span].group || '') === g){ span++; }
+      gh += '<th colspan="' + span + '" class="dg-gh">' + esc(g) + '</th>';
+      i2 += span;
+    }
+    th += gh + (cfg.edit ? '' : '<th class="dg-gh"></th>') + '</tr>';
+  }
+  th += '<tr><th class="dg-no dg-colh">#</th>';
+  cols.forEach(function(c){
+    th += '<th class="dg-colh" style="min-width:' + (c.w || 140) + 'px;">' + esc(c.label) +
+      (c.required ? ' <span class="dg-req">*</span>' : '') +
+      (c.hint ? ' <span class="dg-info" title="' + esc(c.hint) + '">&#9432;</span>' : '') + '</th>';
+  });
+  th += (cfg.edit ? '' : '<th class="dg-colh dg-delh"></th>') + '</tr>';
+
+  var lists = '';
+  cols.forEach(function(c){
+    if(c.suggest){
+      lists += '<datalist id="dgl-' + esc(c.key) + '">' + (dgVal_(c.suggest) || []).map(function(s){ return '<option value="' + esc(s) + '">'; }).join('') + '</datalist>';
+    }
+  });
+
+  var body = '<div class="dg-top"><div class="dg-sub">' + esc(cfg.subtitle || '') + '</div>' +
+    (cfg.edit ? '' : '<button type="button" class="btn secondary" onclick="dgAddRow()">+ Tambah Baris</button>') +
+    '<button type="button" class="btn" id="dgSaveBtn" onclick="dgSaveAll()">&#128190; ' + esc(cfg.saveLabel || (cfg.edit ? 'Simpan' : 'Simpan Semua')) + '</button></div>' +
+    '<div class="dg-wrap" id="dgWrap"><table class="dg' + (hasGroups ? ' has-groups' : '') + '" id="dgTable"><thead>' + th + '</thead><tbody id="dgBody">' +
+    DG.rows.map(function(r, i){ return dgRowHtml_(r, i); }).join('') + '</tbody></table></div>' + lists;
+
+  openModal(cfg.title, body, '');
+  document.querySelector('#modalOverlay .modal').classList.add('wide');
+  document.getElementById('modalFoot').style.display = 'none';
+
+  var table = document.getElementById('dgTable');
+  table.addEventListener('input', dgOnInput_);
+  table.addEventListener('change', dgOnInput_);
+  table.addEventListener('click', dgOnClick_);
+  table.addEventListener('keydown', dgOnKey_);
+  table.addEventListener('paste', dgOnPaste_);
+  setTimeout(function(){ var f = table.querySelector('tbody input:not([readonly]):not([type=checkbox]),tbody textarea'); if(f){ f.focus(); } }, 50);
+}
+
+function dgRenumber_(){
+  var trs = document.querySelectorAll('#dgBody tr');
+  Array.prototype.forEach.call(trs, function(tr, i){
+    var row = dgRow_(tr.getAttribute('data-rid'));
+    if(row){ tr.querySelector('.dg-no').innerHTML = dgNoLabel_(row, i); }
+  });
+}
+function dgAddRow(){
+  if(!DG || DG.cfg.edit) return null;
+  var row = dgNewRow_(null);
+  DG.rows.push(row);
+  var body = document.getElementById('dgBody');
+  body.insertAdjacentHTML('beforeend', dgRowHtml_(row, DG.rows.length - 1));
+  var wrap = document.getElementById('dgWrap');
+  wrap.scrollTop = wrap.scrollHeight;
+  return body.lastElementChild;
+}
+function dgRefreshRow_(row){
+  var tr = document.querySelector('#dgBody tr[data-rid="' + row.id + '"]');
+  if(!tr) return;
+  var idx = DG.rows.indexOf(row);
+  var tmp = document.createElement('tbody');
+  tmp.innerHTML = dgRowHtml_(row, idx);
+  tr.parentNode.replaceChild(tmp.firstChild, tr);
+}
+
+/** Mengisi satu nilai ke baris + jalankan hook onChange + render ulang kolom yang bergantung. */
+function dgSet_(row, key, val, silent){
+  row.vals[key] = val;
+  var col = dgCol_(key);
+  if(col && col.onChange && !silent){
+    col.onChange(row.vals, function(k2, v2){ row.vals[k2] = v2; });
+  }
+}
+function dgAfterChange_(row, key){
+  // Hook onChange bisa mengubah kolom lain di baris yang sama (mis. Departemen otomatis dari PIC),
+  // jadi semua sel lain di baris ini digambar ulang. Sel yang sedang diketik tidak disentuh.
+  var tr = document.querySelector('#dgBody tr[data-rid="' + row.id + '"]');
+  if(!tr) return;
+  DG.cfg.columns.forEach(function(c){
+    if(c.key === key) return;
+    var td = tr.querySelector('td[data-k="' + c.key + '"]');
+    if(td){ td.innerHTML = dgInputHtml_(c, row); }
+  });
+}
+
+function dgOnInput_(e){
+  var el = e.target;
+  var k = el.getAttribute && el.getAttribute('data-k');
+  if(!k || el.classList.contains('dg-multi')) return;
+  var tr = el.closest('tr'); if(!tr) return;
+  var row = dgRow_(tr.getAttribute('data-rid')); if(!row || row.status === 'saved') return;
+  var val = el.type === 'checkbox' ? el.checked : el.value;
+  // select/checkbox: perubahan final; text: tiap ketikan
+  dgSet_(row, k, val);
+  el.classList.remove('dg-bad');
+  var col = dgCol_(k);
+  if(col && (col.onChange || DG.cfg.columns.some(function(c){ return c.dependsOn === k; }))){ dgAfterChange_(row, k); }
+  if(row.status === 'error'){ row.status = 'new'; row.error = ''; tr.className = ''; dgRenumber_(); }
+}
+
+function dgOnClick_(e){
+  var t = e.target;
+  var del = t.closest && t.closest('[data-act="del"]');
+  if(del){
+    if(DG.busy) return;
+    var tr = del.closest('tr'), row = dgRow_(tr.getAttribute('data-rid'));
+    if(DG.rows.length <= 1){ // sisakan satu baris kosong
+      DG.rows = [dgNewRow_(null)];
+      document.getElementById('dgBody').innerHTML = dgRowHtml_(DG.rows[0], 0);
+      return;
+    }
+    DG.rows.splice(DG.rows.indexOf(row), 1);
+    tr.parentNode.removeChild(tr);
+    dgRenumber_();
+    return;
+  }
+  var mb = t.closest && t.closest('.dg-multi');
+  if(mb){ dgOpenMulti_(mb); }
+}
+
+function dgOnKey_(e){
+  if(e.key !== 'Enter') return;
+  var el = e.target;
+  if(!el.matches || !el.matches('input:not([type=checkbox]):not([readonly])')) return;
+  e.preventDefault();
+  var tr = el.closest('tr'), k = el.getAttribute('data-k');
+  var next = tr.nextElementSibling;
+  if(!next && !DG.cfg.edit){ next = dgAddRow(); }
+  if(next){
+    var target = next.querySelector('[data-k="' + k + '"]');
+    if(target && target.focus){ target.focus(); if(target.select){ target.select(); } }
+  }
+}
+
+/* ---------- Tempel (paste) dari Excel / Google Sheets: tab = kolom, baris baru = baris ---------- */
+function dgParseDate_(s){
+  s = String(s).trim();
+  var m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+  m = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
+  if(m) return m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2); // dd/mm/yyyy
+  return '';
+}
+function dgParseNumber_(s){
+  s = String(s).trim().replace(/[^\d.,\-]/g, '');
+  if(/^-?\d{1,3}([.,]\d{3})+$/.test(s)) return s.replace(/[.,]/g, '');
+  return s.replace(',', '.');
+}
+function dgCoerce_(cell, raw, vals){
+  raw = String(raw === undefined ? '' : raw).trim();
+  switch(cell.type){
+    case 'number': return dgParseNumber_(raw);
+    case 'date': return dgParseDate_(raw);
+    case 'check': return /^(1|true|ya|y|yes|x|v|✓)$/i.test(raw);
+    case 'select':
+      var hit = dgOptions_(cell).filter(function(o){ return String(o.v).toLowerCase() === raw.toLowerCase() || String(o.l).toLowerCase() === raw.toLowerCase(); })[0];
+      return hit ? String(hit.v) : (dgEmpty_(raw) ? '' : null);
+    case 'multi':
+      var wanted = raw.split(/[;,]/).map(function(x){ return x.trim().toLowerCase(); }).filter(Boolean);
+      return dgOptions_(cell).filter(function(o){ return wanted.indexOf(String(o.l).toLowerCase()) !== -1 || wanted.indexOf(String(o.v).toLowerCase()) !== -1; }).map(function(o){ return String(o.v); });
+    default: return raw;
+  }
+}
+function dgOnPaste_(e){
+  var el = e.target;
+  if(!el.getAttribute || !el.getAttribute('data-k') || el.type === 'checkbox' || el.readOnly) return;
+  var text = (e.clipboardData || window.clipboardData).getData('text');
+  if(!text || (text.indexOf('\t') === -1 && text.indexOf('\n') === -1)) return; // tempel biasa
+  e.preventDefault();
+  var lines = text.replace(/\r/g, '').replace(/\n+$/, '').split('\n').map(function(l){ return l.split('\t'); });
+  var tr = el.closest('tr'), startRow = DG.rows.indexOf(dgRow_(tr.getAttribute('data-rid')));
+  var cols = DG.cfg.columns, startCol = -1;
+  cols.forEach(function(c, i){ if(c.key === el.getAttribute('data-k')) startCol = i; });
+  if(startCol < 0) return;
+  var touched = [], skipped = 0;
+  lines.forEach(function(cells, ri){
+    var rIdx = startRow + ri;
+    while(rIdx >= DG.rows.length){
+      if(DG.cfg.edit) return;
+      var nr = dgNewRow_(null); DG.rows.push(nr);
+      document.getElementById('dgBody').insertAdjacentHTML('beforeend', dgRowHtml_(nr, DG.rows.length - 1));
+    }
+    var row = DG.rows[rIdx]; if(row.status === 'saved') return;
+    cells.forEach(function(raw, ci){
+      var col = cols[startCol + ci]; if(!col) return;
+      var cell = dgCell_(col, row.vals);
+      if(cell.type === 'readonly' || cell.type === 'none') return;
+      var v = dgCoerce_(cell, raw, row.vals);
+      if(v === null){ skipped++; return; }
+      dgSet_(row, col.key, v);
+    });
+    if(touched.indexOf(row) === -1) touched.push(row);
+  });
+  touched.forEach(dgRefreshRow_);
+  dgRenumber_();
+  toast(skipped ? 'WARNING' : 'INFO', lines.length + ' baris ditempel' + (skipped ? ' (' + skipped + ' sel tidak cocok dengan pilihan dan dilewati)' : '.'));
+}
+
+/* ---------- Multi-pilih (Consulted / Informed) ---------- */
+function dgClosePop_(){ if(DG_POP){ DG_POP.remove(); DG_POP = null; } }
+function dgOpenMulti_(btn){
+  dgClosePop_();
+  var tr = btn.closest('tr'), row = dgRow_(tr.getAttribute('data-rid'));
+  if(!row || row.status === 'saved') return;
+  var col = dgCol_(btn.getAttribute('data-k'));
+  var cur = (row.vals[col.key] || []).map(String);
+  var pop = document.createElement('div');
+  pop.className = 'dg-pop';
+  pop.innerHTML = dgOptions_(col).map(function(o){
+    return '<label><input type="checkbox" value="' + esc(o.v) + '"' + (cur.indexOf(String(o.v)) !== -1 ? ' checked' : '') + '> ' + esc(o.l) + '</label>';
+  }).join('') || '<div class="muted" style="padding:8px;">Tidak ada pilihan.</div>';
+  document.body.appendChild(pop);
+  var r = btn.getBoundingClientRect();
+  var top = r.bottom + 2, maxH = Math.max(140, window.innerHeight - top - 12);
+  if(maxH < 180 && r.top > window.innerHeight / 2){ top = Math.max(8, r.top - 230); maxH = 226; }
+  pop.style.cssText = 'left:' + Math.min(r.left, window.innerWidth - 250) + 'px;top:' + top + 'px;max-height:' + maxH + 'px;min-width:' + Math.max(r.width, 200) + 'px;';
+  pop.addEventListener('change', function(){
+    var ids = Array.prototype.filter.call(pop.querySelectorAll('input'), function(i){ return i.checked; }).map(function(i){ return i.value; });
+    row.vals[col.key] = ids;
+    btn.textContent = dgMultiLabel_(col, ids);
+  });
+  DG_POP = pop;
+  setTimeout(function(){
+    document.addEventListener('mousedown', dgPopOutside_, true);
+    var w = document.getElementById('dgWrap'); if(w){ w.addEventListener('scroll', dgClosePop_, { once: true }); }
+  }, 0);
+}
+function dgPopOutside_(e){
+  if(DG_POP && !DG_POP.contains(e.target)){ dgClosePop_(); document.removeEventListener('mousedown', dgPopOutside_, true); }
+}
+
+/* ---------- Simpan ---------- */
+function dgIsBlank_(row){
+  return DG.cfg.columns.every(function(c){
+    var cell = dgCell_(c, row.vals);
+    if(cell.type === 'readonly' || cell.type === 'none') return true;
+    var v = row.vals[c.key], d = dgVal_(c.default);
+    if(d === undefined){ d = (c.type === 'multi') ? [] : (c.type === 'check' ? false : ''); }
+    if(Array.isArray(v)) return v.length === (d || []).length && v.every(function(x, i){ return String(x) === String((d || [])[i]); });
+    if(c.type === 'check') return dgBool_(v) === dgBool_(d);
+    return String(v === undefined || v === null ? '' : v).trim() === String(d === undefined || d === null ? '' : d).trim();
+  });
+}
+function dgMissing_(row){
+  var miss = [];
+  DG.cfg.columns.forEach(function(c){
+    var cell = dgCell_(c, row.vals);
+    if(!c.required || cell.type === 'none') return;
+    var v = row.vals[c.key];
+    if(dgEmpty_(typeof v === 'string' ? v.trim() : v)){ miss.push(c.key); }
+  });
+  return miss;
+}
+function dgMarkBad_(row, keys){
+  var tr = document.querySelector('#dgBody tr[data-rid="' + row.id + '"]'); if(!tr) return;
+  keys.forEach(function(k){
+    var inp = tr.querySelector('td[data-k="' + k + '"] .input');
+    if(inp){ inp.classList.add('dg-bad'); }
+  });
+}
+function dgSetStatus_(row, status, error){
+  row.status = status; row.error = error || '';
+  var tr = document.querySelector('#dgBody tr[data-rid="' + row.id + '"]'); if(!tr) return;
+  tr.className = status === 'new' ? '' : 'dg-' + status;
+  var no = tr.querySelector('.dg-no');
+  no.title = row.error;
+  no.innerHTML = dgNoLabel_(row, DG.rows.indexOf(row));
+  if(status === 'saved'){
+    Array.prototype.forEach.call(tr.querySelectorAll('input,select,textarea,button.dg-multi'), function(i){ i.disabled = true; });
+    var x = tr.querySelector('.dg-x'); if(x){ x.style.visibility = 'hidden'; }
+  }
+}
+function dgSaveAll(){
+  if(!DG || DG.busy) return;
+  var cfg = DG.cfg, todo = [], invalid = [];
+  DG.rows.forEach(function(r){
+    if(r.status === 'saved') return;
+    if(dgIsBlank_(r)) return;
+    var miss = dgMissing_(r);
+    if(miss.length){ invalid.push(r); dgMarkBad_(r, miss); dgSetStatus_(r, 'error', 'Kolom bertanda * wajib diisi.'); }
+    else { todo.push(r); }
+  });
+  if(invalid.length){
+    var first = document.querySelector('#dgBody .dg-bad');
+    if(first){ first.scrollIntoView({ block: 'nearest', inline: 'nearest' }); first.focus(); }
+  }
+  if(!todo.length){
+    toast('WARNING', invalid.length ? invalid.length + ' baris belum lengkap (kolom bertanda *).' : 'Belum ada data yang diisi.');
+    return;
+  }
+  DG.busy = true;
+  var btn = document.getElementById('dgSaveBtn');
+  var ok = 0, fail = 0;
+  (function next(i){
+    if(i >= todo.length){ return finish(); }
+    var row = todo[i];
+    if(btn){ btn.disabled = true; btn.textContent = 'Menyimpan ' + (i + 1) + '/' + todo.length + '…'; }
+    dgSetStatus_(row, 'saving');
+    Promise.resolve().then(function(){ return cfg.save(row.vals, DG.rows.indexOf(row)); }).then(function(){
+      ok++; dgSetStatus_(row, 'saved');
+    }, function(err){
+      fail++; dgSetStatus_(row, 'error', (err && err.message) ? err.message : 'Gagal menyimpan.');
+    }).then(function(){ next(i + 1); });
+  })(0);
+  function finish(){
+    DG.busy = false;
+    if(btn){ btn.disabled = false; btn.innerHTML = '&#128190; ' + esc(cfg.saveLabel || (cfg.edit ? 'Simpan' : 'Simpan Semua')); }
+    if(!fail && !invalid.length){
+      toast('SUCCESS', ok + (cfg.edit ? ' data tersimpan.' : ' baris berhasil disimpan.'));
+      closeModal();
+      if(cfg.onDone) cfg.onDone();
+      return;
+    }
+    toast('WARNING', ok + ' tersimpan, ' + (fail + invalid.length) + ' belum. Baris bertanda ! perlu diperbaiki lalu klik simpan lagi.');
+    if(ok && cfg.onDone) cfg.onDone();
+  }
+}
+
+/*************************************************************************************************
+ * FORM EMPLOYEE / ASSET / TASK MASTER - semuanya memakai DATAGRID (lihat bagian DATAGRID di atas).
+ *************************************************************************************************/
+function dgUniq_(list, key){
+  var seen = {}, out = [];
+  (list || []).forEach(function(x){ var v = String(x[key] || '').trim(); if(v && !seen[v.toLowerCase()]){ seen[v.toLowerCase()] = 1; out.push(v); } });
+  return out.sort();
+}
+function dgEmpOptions_(){
+  return (CACHE.employees || []).map(function(e){ return { v: String(e.Employee_ID), l: e.Name }; });
+}
+
+/* ------------------------------- EMPLOYEES ------------------------------- */
+function openEmployeeForm(employeeId){
+  var existing = employeeId ? CACHE.employees.filter(function(e){ return String(e.Employee_ID) === String(employeeId); })[0] : null;
+  openDataGrid({
+    title: existing ? 'Edit Karyawan' : 'Tambah Karyawan',
+    subtitle: existing ? 'Ubah data pada tabel, lalu klik Simpan.' : 'Isi data pada tabel (bisa banyak baris, atau tempel dari Excel), lalu klik Simpan Semua. Baris yang masih kosong akan diabaikan.',
+    edit: !!existing, minRows: 3,
+    columns: [
+      { key: 'Employee_Code', label: 'Kode', type: 'text', w: 120, placeholder: 'Otomatis', hint: 'Kosongkan agar kode dibuat otomatis.' },
+      { key: 'Name', label: 'Nama', type: 'text', required: true, w: 220 },
+      { key: 'Department', label: 'Departemen', type: 'text', w: 170, suggest: function(){ return dgUniq_(CACHE.employees, 'Department'); } },
+      { key: 'Position', label: 'Posisi', type: 'text', w: 170, suggest: function(){ return dgUniq_(CACHE.employees, 'Position'); } },
+      { key: 'Phone', label: 'Telepon', type: 'text', w: 150 },
+      { key: 'Email', label: 'Email', type: 'text', w: 210 },
+      { key: 'Join_Date', label: 'Tgl Bergabung', type: 'date', w: 160, default: function(){ return todayStr_(); } }
+    ],
+    rows: existing ? [{ Employee_Code: existing.Employee_Code, Name: existing.Name, Department: existing.Department, Position: existing.Position,
+      Phone: existing.Phone, Email: existing.Email, Join_Date: String(existing.Join_Date || '').substring(0, 10) }] : null,
+    save: function(v){
+      var data = { Employee_Code: String(v.Employee_Code).trim(), Name: String(v.Name).trim(), Department: String(v.Department).trim(),
+        Position: String(v.Position).trim(), Phone: String(v.Phone).trim(), Email: String(v.Email).trim(), Join_Date: v.Join_Date };
+      return existing ? call('updateEmployee', STATE.token, employeeId, data) : call('addEmployee', STATE.token, data);
+    },
+    onDone: loadEmployees
+  });
+}
+
+/* --------------------------------- ASSETS -------------------------------- */
+function openAssetForm(assetId){
+  var existing = assetId ? CACHE.assets.filter(function(a){ return String(a.Asset_ID) === String(assetId); })[0] : null;
+  openDataGrid({
+    title: existing ? 'Edit Asset' : 'Tambah Asset',
+    subtitle: existing ? 'Ubah data pada tabel, lalu klik Simpan.' : 'Isi data pada tabel (bisa banyak baris, atau tempel dari Excel), lalu klik Simpan Semua. Baris yang masih kosong akan diabaikan.',
+    edit: !!existing, minRows: 3,
+    columns: [
+      { key: 'Asset_Code', label: 'Kode', type: 'text', w: 130 },
+      { key: 'Asset_Name', label: 'Nama Asset', type: 'text', required: true, w: 230 },
+      { key: 'Category', label: 'Kategori', type: 'text', w: 160, suggest: function(){ return dgUniq_(CACHE.assets, 'Category'); } },
+      { key: 'Location', label: 'Lokasi', type: 'text', w: 170, suggest: function(){ return dgUniq_(CACHE.assets, 'Location'); } },
+      { key: 'Purchase_Date', label: 'Tgl Beli', type: 'date', w: 160 },
+      { key: 'Purchase_Cost', label: 'Harga Beli (Rp)', type: 'number', w: 150, default: 0, min: 0 },
+      { key: 'Condition', label: 'Kondisi', type: 'select', w: 130, default: 'GOOD', options: ['GOOD', 'FAIR', 'DAMAGED'] },
+      { key: 'Description', label: 'Deskripsi', type: 'text', w: 260 }
+    ],
+    rows: existing ? [{ Asset_Code: existing.Asset_Code, Asset_Name: existing.Asset_Name, Category: existing.Category, Location: existing.Location,
+      Purchase_Date: String(existing.Purchase_Date || '').substring(0, 10), Purchase_Cost: existing.Purchase_Cost || 0,
+      Condition: existing.Condition || 'GOOD', Description: existing.Description }] : null,
+    save: function(v){
+      var data = { Asset_Code: String(v.Asset_Code).trim(), Asset_Name: String(v.Asset_Name).trim(), Category: String(v.Category).trim(),
+        Location: String(v.Location).trim(), Purchase_Date: v.Purchase_Date, Purchase_Cost: v.Purchase_Cost === '' ? 0 : v.Purchase_Cost,
+        Condition: v.Condition, Description: String(v.Description).trim() };
+      return existing ? call('updateAsset', STATE.token, assetId, data) : call('addAsset', STATE.token, data);
+    },
+    onDone: loadAssets
+  });
+}
+
+/* ------------------------------- TASK MASTER ------------------------------ */
+function openTaskMasterForm(taskId){
+  var existing = taskId ? CACHE.taskMaster.filter(function(t){ return String(t.Task_ID) === String(taskId); })[0] : null;
+  if(existing){
+    // Edit: muat dulu data RACI-nya agar kolom Accountable/Consulted/Informed terisi.
+    call('getRaciForTask', STATE.token, existing.Task_ID).then(function(raci){ openTaskMasterGrid_(existing, raci); });
+  } else {
+    openTaskMasterGrid_(null, null);
+  }
+}
+function openTaskMasterGrid_(existing, raci){
+  var days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'].map(function(d, i){ return { v: String(i + 1), l: d }; });
+  var empBlank = '—';
+  var picHook = function(vals, set){
+    var emp = (CACHE.employees || []).filter(function(e){ return String(e.Employee_ID) === String(vals.Primary_PIC_ID); })[0];
+    set('Department', emp ? (emp.Department || '') : ''); set('Position', emp ? (emp.Position || '') : '');
+  };
+  var initial = null;
+  if(existing){
+    var st = existing.Schedule_Type || 'DAILY';
+    initial = [{
+      Task_Name: existing.Task_Name, Task_Item: existing.Task_Item, Primary_PIC_ID: String(existing.Primary_PIC_ID || ''), Backup_PIC_ID: String(existing.Backup_PIC_ID || ''),
+      Department: existing.Department, Position: existing.Position,
+      Schedule_Type: st, DayVal: st === 'WEEKLY' ? String(existing.Day_Of_Week || 1) : (st === 'MONTHLY' ? String(existing.Day_Of_Month || 1) : ''),
+      Task_Type: existing.Task_Type || 'RECURRING', Frequency: existing.Frequency || 'DAILY', Task_Category: existing.Task_Category || '',
+      Start_Time: existing.Start_Time, Due_Time: existing.Due_Time,
+      Required: dgBool_(existing.Required), Photo_Required: dgBool_(existing.Photo_Required), Sort_Order: existing.Sort_Order || 0,
+      Description: existing.Description, Output: existing.Output,
+      Accountable: raci && raci.accountable ? String(raci.accountable.Employee_ID) : '',
+      Consulted: raci ? raci.consulted.map(function(c){ return String(c.Employee_ID); }) : [],
+      Informed: raci ? raci.informed.map(function(c){ return String(c.Employee_ID); }) : [],
+      Authority_Level: existing.Authority_Level || '', Authority_Limit: existing.Authority_Limit, Spending_Limit: existing.Spending_Limit,
+      Escalation_Enabled: dgBool_(existing.Escalation_Enabled), Escalation_Trigger: existing.Escalation_Trigger,
+      Escalation_To: existing.Escalation_To || 'MANAGER', Escalation_Time_Limit: existing.Escalation_Time_Limit,
+      SOP_Reference: existing.SOP_Reference, Work_Instruction: existing.Work_Instruction, Tools_Equipment: existing.Tools_Equipment,
+      Required_Resources: existing.Required_Resources, Safety_Instruction: existing.Safety_Instruction
+    }];
+  }
+  var G1 = 'Umum', G2 = 'PIC', G3 = 'Jadwal', G4 = 'Pelaksanaan', G5 = 'RACI', G6 = 'Kewenangan (DOA)', G7 = 'Eskalasi', G8 = 'SOP & Keselamatan';
+  openDataGrid({
+    title: existing ? 'Edit Task Master' : 'Tambah Task Master',
+    subtitle: existing ? 'Ubah data pada tabel (geser ke kanan untuk kolom lainnya), lalu klik Simpan.'
+      : 'Isi data pada tabel (bisa banyak baris, atau tempel dari Excel; geser ke kanan untuk kolom lainnya), lalu klik Simpan Semua. Baris yang masih kosong akan diabaikan.',
+    edit: !!existing, minRows: 3,
+    columns: [
+      { key: 'Task_Name', group: G1, label: 'Nama Task', type: 'text', required: true, w: 230 },
+      { key: 'Task_Item', group: G1, label: 'Task Item', type: 'textarea', w: 240, hint: 'Checklist, satu item per baris.' },
+      { key: 'Primary_PIC_ID', group: G2, label: 'Primary PIC', type: 'select', w: 180, blank: empBlank, options: dgEmpOptions_, onChange: picHook },
+      { key: 'Backup_PIC_ID', group: G2, label: 'Backup PIC', type: 'select', w: 180, blank: empBlank, options: dgEmpOptions_ },
+      { key: 'Department', group: G2, label: 'Departemen', type: 'readonly', w: 150, hint: 'Otomatis dari Primary PIC.' },
+      { key: 'Position', group: G2, label: 'Posisi', type: 'readonly', w: 150, hint: 'Otomatis dari Primary PIC.' },
+      { key: 'Schedule_Type', group: G3, label: 'Jadwal Engine', type: 'select', required: true, w: 140, default: 'DAILY', options: ['DAILY', 'WEEKLY', 'MONTHLY'],
+        hint: 'Menentukan generate instance task.',
+        onChange: function(vals, set){ set('DayVal', '1'); if(!existing){ set('Frequency', vals.Schedule_Type); } } },
+      { key: 'DayVal', group: G3, label: 'Hari / Tanggal', type: 'dynamic', w: 140, dependsOn: 'Schedule_Type', hint: 'Weekly: pilih hari. Monthly: tanggal 1-31. Daily: tidak perlu.',
+        dynamic: function(vals){
+          if(vals.Schedule_Type === 'WEEKLY') return { type: 'select', options: days };
+          if(vals.Schedule_Type === 'MONTHLY') return { type: 'number', min: 1, max: 31, step: 1 };
+          return { type: 'none', text: '—' };
+        } },
+      { key: 'Task_Type', group: G3, label: 'Sifat Tugas', type: 'select', w: 140, default: 'RECURRING',
+        options: [{ v: 'RECURRING', l: 'Recurring' }, { v: 'ONE_TIME', l: 'One-Time' }, { v: 'AD_HOC', l: 'Ad Hoc' }, { v: 'IMPROVEMENT', l: 'Improvement' }] },
+      { key: 'Frequency', group: G3, label: 'Frekuensi', type: 'select', w: 120, default: 'DAILY',
+        options: [{ v: 'DAILY', l: 'Daily' }, { v: 'WEEKLY', l: 'Weekly' }, { v: 'MONTHLY', l: 'Monthly' }, { v: 'NONE', l: 'None' }] },
+      { key: 'Task_Category', group: G3, label: 'Tahap Kerja', type: 'select', w: 150, blank: '—',
+        options: [{ v: 'PREPARATION', l: 'Preparation' }, { v: 'OPERATION', l: 'Operation' }, { v: 'CLOSING', l: 'Closing' }, { v: 'IMPROVEMENT', l: 'Improvement' }, { v: 'OTHER', l: 'Other' }] },
+      { key: 'Start_Time', group: G4, label: 'Jam Mulai', type: 'time', w: 120 },
+      { key: 'Due_Time', group: G4, label: 'Jam Due', type: 'time', w: 120 },
+      { key: 'Required', group: G4, label: 'Wajib', type: 'check', w: 70, default: true },
+      { key: 'Photo_Required', group: G4, label: 'Foto Bukti', type: 'check', w: 80 },
+      { key: 'Sort_Order', group: G4, label: 'Urutan', type: 'number', w: 90, default: 0 },
+      { key: 'Description', group: G4, label: 'Deskripsi', type: 'textarea', w: 220 },
+      { key: 'Output', group: G4, label: 'Output', type: 'textarea', w: 220, hint: 'Hasil yang diharapkan dari tugas ini.' },
+      { key: 'Accountable', group: G5, label: 'Accountable', type: 'select', w: 180, blank: empBlank, options: dgEmpOptions_, hint: 'Penanggung jawab hasil. Responsible = Primary/Backup PIC.' },
+      { key: 'Consulted', group: G5, label: 'Consulted', type: 'multi', w: 170, options: dgEmpOptions_, hint: 'Pihak yang dikonsultasikan.' },
+      { key: 'Informed', group: G5, label: 'Informed', type: 'multi', w: 170, options: dgEmpOptions_, hint: 'Pihak yang diberi informasi.' },
+      { key: 'Authority_Level', group: G6, label: 'Authority Level', type: 'select', w: 140, blank: '—',
+        options: [{ v: 'STAFF', l: 'Staff' }, { v: 'SUPERVISOR', l: 'Supervisor' }, { v: 'MANAGER', l: 'Manager' }, { v: 'OWNER', l: 'Owner' }] },
+      { key: 'Authority_Limit', group: G6, label: 'Authority Limit', type: 'number', w: 130, hint: 'Batas kewenangan, angka bebas sesuai konteks task.' },
+      { key: 'Spending_Limit', group: G6, label: 'Spending Limit (Rp)', type: 'number', w: 150 },
+      { key: 'Escalation_Enabled', group: G7, label: 'Aktif', type: 'check', w: 70 },
+      { key: 'Escalation_Trigger', group: G7, label: 'Trigger', type: 'text', w: 220, placeholder: 'Mis: Belum selesai melewati jam Due' },
+      { key: 'Escalation_To', group: G7, label: 'Eskalasi Kepada', type: 'select', w: 150, default: 'MANAGER', options: ['SUPERVISOR', 'MANAGER', 'OWNER', 'ADMIN'] },
+      { key: 'Escalation_Time_Limit', group: G7, label: 'Batas Waktu (jam)', type: 'number', w: 140 },
+      { key: 'SOP_Reference', group: G8, label: 'Referensi SOP', type: 'text', w: 190, hint: 'Link atau kode dokumen.' },
+      { key: 'Work_Instruction', group: G8, label: 'Petunjuk Kerja', type: 'textarea', w: 230 },
+      { key: 'Tools_Equipment', group: G8, label: 'Tools / Equipment', type: 'text', w: 190 },
+      { key: 'Required_Resources', group: G8, label: 'Sumber Daya', type: 'text', w: 190 },
+      { key: 'Safety_Instruction', group: G8, label: 'Petunjuk Keselamatan', type: 'textarea', w: 230 }
+    ],
+    rows: initial,
+    save: function(v){
+      var type = v.Schedule_Type, t = function(x){ return String(x === undefined || x === null ? '' : x).trim(); };
+      var data = {
+        Task_Name: t(v.Task_Name), Task_Item: String(v.Task_Item || ''), Department: t(v.Department), Position: t(v.Position),
+        Schedule_Type: type, Task_Type: v.Task_Type, Frequency: v.Frequency, Task_Category: v.Task_Category,
+        Day_Of_Week: type === 'WEEKLY' ? v.DayVal : '', Day_Of_Month: type === 'MONTHLY' ? v.DayVal : '',
+        Primary_PIC_ID: v.Primary_PIC_ID, Backup_PIC_ID: v.Backup_PIC_ID, Start_Time: v.Start_Time, Due_Time: v.Due_Time,
+        Required: !!v.Required, Photo_Required: !!v.Photo_Required, Sort_Order: v.Sort_Order === '' ? 0 : v.Sort_Order,
+        Description: String(v.Description || ''), Output: String(v.Output || ''),
+        Authority_Level: v.Authority_Level, Authority_Limit: v.Authority_Limit, Spending_Limit: v.Spending_Limit,
+        Escalation_Enabled: !!v.Escalation_Enabled, Escalation_Trigger: t(v.Escalation_Trigger), Escalation_To: v.Escalation_To,
+        Escalation_Time_Limit: v.Escalation_Time_Limit, SOP_Reference: t(v.SOP_Reference), Work_Instruction: t(v.Work_Instruction),
+        Tools_Equipment: t(v.Tools_Equipment), Required_Resources: t(v.Required_Resources), Safety_Instruction: t(v.Safety_Instruction)
+      };
+      var p = existing ? call('updateTaskMaster', STATE.token, existing.Task_ID, data) : call('addTaskMaster', STATE.token, data);
+      return p.then(function(saved){
+        var id = existing ? existing.Task_ID : saved.Task_ID;
+        var hasRaci = v.Accountable || (v.Consulted && v.Consulted.length) || (v.Informed && v.Informed.length);
+        if(!existing && !hasRaci) return null; // task baru tanpa RACI: tidak perlu panggilan tambahan
+        return Promise.all([
+          call('setTaskAccountable', STATE.token, id, v.Accountable || ''),
+          call('setRaciConsultedInformed', STATE.token, id, v.Consulted || [], v.Informed || [])
+        ]);
+      });
+    },
+    onDone: loadTaskMasterTable
+  });
+}
+
+/*************************************************************************************************
  * MODULE: EMPLOYEES
  *************************************************************************************************/
 RENDERERS.employees = function(){
@@ -2191,26 +2867,6 @@ function loadEmployees(){
     document.getElementById('empTableWrap').innerHTML = '<table class="tbl"><thead><tr><th>Kode</th><th>Nama</th><th>Departemen</th><th>Posisi</th><th>Telepon</th><th>Status</th><th>Aksi</th></tr></thead><tbody>' +
       (rows || '<tr><td colspan="7" class="empty-state">Belum ada karyawan.</td></tr>') + '</tbody></table>';
   });
-}
-function openEmployeeForm(employeeId){
-  var existing = employeeId ? CACHE.employees.filter(function(e){ return String(e.Employee_ID)===String(employeeId); })[0] : null;
-  var body = '<div class="formrow"><label>Kode Karyawan</label><input class="input" id="empCode" value="'+(existing?esc(existing.Employee_Code):'')+'"></div>' +
-    '<div class="formrow"><label>Nama</label><input class="input" id="empName" value="'+(existing?esc(existing.Name):'')+'"></div>' +
-    '<div class="formrow"><label>Departemen</label><input class="input" id="empDept" value="'+(existing?esc(existing.Department):'')+'"></div>' +
-    '<div class="formrow"><label>Posisi</label><input class="input" id="empPos" value="'+(existing?esc(existing.Position):'')+'"></div>' +
-    '<div class="formrow"><label>Telepon</label><input class="input" id="empPhone" value="'+(existing?esc(existing.Phone):'')+'"></div>' +
-    '<div class="formrow"><label>Email</label><input class="input" id="empEmail" value="'+(existing?esc(existing.Email):'')+'"></div>' +
-    '<div class="formrow"><label>Tanggal Bergabung</label><input type="date" class="input" id="empJoin" value="'+(existing?esc(existing.Join_Date).substring(0,10):'')+'"></div>';
-  openModal(existing ? 'Edit Karyawan' : 'Tambah Karyawan', body,
-    '<button class="btn secondary" onclick="closeModal()">Batal</button><button class="btn" onclick="submitEmployeeForm(\''+(employeeId||'')+'\')">Simpan</button>');
-}
-function submitEmployeeForm(employeeId){
-  var data = { Employee_Code: document.getElementById('empCode').value, Name: document.getElementById('empName').value,
-    Department: document.getElementById('empDept').value, Position: document.getElementById('empPos').value,
-    Phone: document.getElementById('empPhone').value, Email: document.getElementById('empEmail').value,
-    Join_Date: document.getElementById('empJoin').value };
-  var p = employeeId ? call('updateEmployee', STATE.token, employeeId, data) : call('addEmployee', STATE.token, data);
-  p.then(function(){ toast('SUCCESS','Data karyawan tersimpan.'); closeModal(); loadEmployees(); });
 }
 function deactivateEmp(employeeId){
   confirmAction('Nonaktifkan karyawan ini?', function(){
@@ -2302,140 +2958,6 @@ function empOptions(selectedId){
 }
 function empOptionsMulti(){
   return CACHE.employees.map(function(e){ return '<option value="'+e.Employee_ID+'">'+esc(e.Name)+'</option>'; }).join('');
-}
-function openTaskMasterForm(taskId){
-  var existing = taskId ? CACHE.taskMaster.filter(function(t){ return String(t.Task_ID)===String(taskId); })[0] : null;
-  var body = '<div class="formrow"><label>Nama Task</label><input class="input" id="tmName" value="'+(existing?esc(existing.Task_Name):'')+'"></div>' +
-    '<div class="formrow"><label>Task Item <span class="muted" style="font-weight:400;">(checklist, satu item per baris)</span></label><textarea class="input" id="tmItem" rows="4" placeholder="Contoh:\nCek tekanan angin ban\nCek rem berfungsi\nLap bodi wahana">'+(existing?esc(existing.Task_Item):'')+'</textarea></div>' +
-    '<div class="formrow"><label>Primary PIC</label><select class="input" id="tmPrimary" onchange="onTMPicChange()">'+empOptions(existing?existing.Primary_PIC_ID:null)+'</select></div>' +
-    '<div class="formrow"><label>Backup PIC</label><select class="input" id="tmBackup">'+empOptions(existing?existing.Backup_PIC_ID:null)+'</select></div>' +
-    '<div class="formrow"><label>Departemen <span class="muted" style="font-weight:400;">(otomatis dari Primary PIC)</span></label><input class="input" id="tmDept" value="'+(existing?esc(existing.Department):'')+'" readonly></div>' +
-    '<div class="formrow"><label>Posisi <span class="muted" style="font-weight:400;">(otomatis dari Primary PIC)</span></label><input class="input" id="tmPos" value="'+(existing?esc(existing.Position):'')+'" readonly></div>' +
-    '<div class="formrow"><label>Jadwal Engine (menentukan generate instance)</label><select class="input" id="tmType" onchange="renderTaskMasterFreqFields()"><option value="DAILY">DAILY</option><option value="WEEKLY">WEEKLY</option><option value="MONTHLY">MONTHLY</option></select></div>' +
-    '<div id="tmFreqWrap"></div>' +
-    '<div class="formrow"><label>Task Type (Sifat Tugas)</label><select class="input" id="tmTaskType">' +
-      '<option value="RECURRING">Recurring</option><option value="ONE_TIME">One-Time</option>' +
-      '<option value="AD_HOC">Ad Hoc</option><option value="IMPROVEMENT">Improvement</option>' +
-    '</select></div>' +
-    '<div class="formrow"><label>Frequency</label><select class="input" id="tmFrequency">' +
-      '<option value="DAILY">Daily</option><option value="WEEKLY">Weekly</option>' +
-      '<option value="MONTHLY">Monthly</option><option value="NONE">None</option>' +
-    '</select></div>' +
-    '<div class="formrow"><label>Work Stage (Tahap Kerja)</label><select class="input" id="tmCat">' +
-      '<option value="">-</option><option value="PREPARATION">Preparation</option><option value="OPERATION">Operation</option>' +
-      '<option value="CLOSING">Closing</option><option value="IMPROVEMENT">Improvement</option><option value="OTHER">Other</option>' +
-    '</select></div>' +
-    '<div class="formrow"><label>Jam Mulai</label><input type="time" lang="id-ID" step="60" class="input" id="tmStart" value="'+(existing?esc(existing.Start_Time):'')+'"></div>' +
-    '<div class="formrow"><label>Jam Due</label><input type="time" lang="id-ID" step="60" class="input" id="tmDue" value="'+(existing?esc(existing.Due_Time):'')+'"></div>' +
-    '<div class="formrow"><label><input type="checkbox" id="tmRequired" '+(!existing || existing.Required===true || existing.Required==='TRUE' || existing.Required==='true' ? 'checked' : '')+'> Wajib Dikerjakan</label></div>' +
-    '<div class="formrow"><label><input type="checkbox" id="tmPhotoReq" '+(existing && (existing.Photo_Required===true || existing.Photo_Required==='TRUE' || existing.Photo_Required==='true') ? 'checked' : '')+'> Wajib Foto Bukti</label></div>' +
-    '<div class="formrow"><label>Urutan Tampil</label><input type="number" class="input" id="tmSort" value="'+(existing?existing.Sort_Order:0)+'"></div>' +
-    '<div class="formrow"><label>Deskripsi</label><textarea class="input" id="tmDesc">'+(existing?esc(existing.Description):'')+'</textarea></div>' +
-    '<div class="formrow"><label>Output <span class="muted" style="font-weight:400;">(hasil yang diharapkan dari tugas ini)</span></label><textarea class="input" id="tmOutput">'+(existing?esc(existing.Output):'')+'</textarea></div>' +
-
-    '<h4 style="margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px;">&#128101; RACI - Peran &amp; Tanggung Jawab</h4>' +
-    '<p class="muted" style="font-size:12px;margin-top:-4px;">Responsible = Primary/Backup PIC di atas. Atur sisanya di sini.</p>' +
-    '<div class="formrow"><label>Accountable <span class="muted" style="font-weight:400;">(Penanggung Jawab Hasil)</span></label><select class="input" id="tmAccountable">'+empOptions(null)+'</select></div>' +
-    '<div class="formrow"><label>Consulted <span class="muted" style="font-weight:400;">(Pihak yang Dikonsultasikan)</span></label><select class="input" id="tmConsulted" multiple size="4">'+empOptionsMulti()+'</select></div>' +
-    '<div class="formrow"><label>Informed <span class="muted" style="font-weight:400;">(Pihak yang Diberi Informasi)</span></label><select class="input" id="tmInformed" multiple size="4">'+empOptionsMulti()+'</select></div>' +
-
-    '<h4 style="margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px;">&#9878; Kewenangan (DOA)</h4>' +
-    '<div class="formrow"><label>Authority Level <span class="muted" style="font-weight:400;">(Tingkat Kewenangan)</span></label><select class="input" id="tmAuthLevel"><option value="">- Tidak diatur -</option><option value="STAFF">Staff</option><option value="SUPERVISOR">Supervisor</option><option value="MANAGER">Manager</option><option value="OWNER">Owner</option></select></div>' +
-    '<div class="formrow"><label>Authority Limit <span class="muted" style="font-weight:400;">(Batas Kewenangan, angka bebas sesuai konteks task)</span></label><input type="number" class="input" id="tmAuthLimit" step="any" value="'+(existing?esc(existing.Authority_Limit):'')+'"></div>' +
-    '<div class="formrow"><label>Spending Limit <span class="muted" style="font-weight:400;">(Batas Pengeluaran, Rp)</span></label><input type="number" class="input" id="tmSpendLimit" step="any" value="'+(existing?esc(existing.Spending_Limit):'')+'"></div>' +
-
-    '<h4 style="margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px;">&#9200; Eskalasi</h4>' +
-    '<div class="formrow"><label><input type="checkbox" id="tmEscEnabled" '+(existing && (existing.Escalation_Enabled===true||existing.Escalation_Enabled==='TRUE'||existing.Escalation_Enabled==='true') ? 'checked' : '')+'> Aktifkan Eskalasi untuk task ini</label></div>' +
-    '<div class="formrow"><label>Escalation Trigger <span class="muted" style="font-weight:400;">(Kondisi Eskalasi)</span></label><input type="text" class="input" id="tmEscTrigger" placeholder="Mis: Belum selesai melewati jam Due" value="'+(existing?esc(existing.Escalation_Trigger):'')+'"></div>' +
-    '<div class="formrow"><label>Escalation To <span class="muted" style="font-weight:400;">(Eskalasi Kepada)</span></label><select class="input" id="tmEscTo"><option value="SUPERVISOR">SUPERVISOR</option><option value="MANAGER">MANAGER</option><option value="OWNER">OWNER</option><option value="ADMIN">ADMIN</option></select></div>' +
-    '<div class="formrow"><label>Escalation Time Limit <span class="muted" style="font-weight:400;">(Batas Waktu Eskalasi, jam)</span></label><input type="number" class="input" id="tmEscTimeLimit" value="'+(existing?esc(existing.Escalation_Time_Limit):'')+'"></div>' +
-
-    '<h4 style="margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px;">&#128220; SOP &amp; Keselamatan</h4>' +
-    '<div class="formrow"><label>SOP Reference <span class="muted" style="font-weight:400;">(Referensi SOP - link/kode dokumen)</span></label><input type="text" class="input" id="tmSopRef" value="'+(existing?esc(existing.SOP_Reference):'')+'"></div>' +
-    '<div class="formrow"><label>Work Instruction <span class="muted" style="font-weight:400;">(Petunjuk Kerja)</span></label><textarea class="input" id="tmWorkInstruction">'+(existing?esc(existing.Work_Instruction):'')+'</textarea></div>' +
-    '<div class="formrow"><label>Tools / Equipment <span class="muted" style="font-weight:400;">(Peralatan yang Dibutuhkan)</span></label><input type="text" class="input" id="tmTools" value="'+(existing?esc(existing.Tools_Equipment):'')+'"></div>' +
-    '<div class="formrow"><label>Required Resources <span class="muted" style="font-weight:400;">(Sumber Daya yang Dibutuhkan)</span></label><input type="text" class="input" id="tmResources" value="'+(existing?esc(existing.Required_Resources):'')+'"></div>' +
-    '<div class="formrow"><label>Safety Instruction <span class="muted" style="font-weight:400;">(Petunjuk Keselamatan)</span></label><textarea class="input" id="tmSafety">'+(existing?esc(existing.Safety_Instruction):'')+'</textarea></div>';
-  openModal(existing ? 'Edit Task Master' : 'Tambah Task Master', body,
-    '<button class="btn secondary" onclick="closeModal()">Batal</button><button class="btn" onclick="submitTaskMasterForm(\''+(taskId||'')+'\')">Simpan</button>');
-  setTimeout(function(){
-    document.getElementById('tmType').value = existing ? (existing.Schedule_Type||'DAILY') : 'DAILY';
-    document.getElementById('tmTaskType').value = existing ? (existing.Task_Type||'RECURRING') : 'RECURRING';
-    document.getElementById('tmFrequency').value = existing ? (existing.Frequency||'DAILY') : 'DAILY';
-    document.getElementById('tmCat').value = existing ? (existing.Task_Category||'') : '';
-    document.getElementById('tmAuthLevel').value = existing ? (existing.Authority_Level||'') : '';
-    document.getElementById('tmEscTo').value = existing ? (existing.Escalation_To||'MANAGER') : 'MANAGER';
-    renderTaskMasterFreqFields(existing);
-    if(!existing) onTMPicChange();
-    if(existing){
-      call('getRaciForTask', STATE.token, existing.Task_ID).then(function(raci){
-        document.getElementById('tmAccountable').value = raci.accountable ? raci.accountable.Employee_ID : '';
-        var consultedIds = raci.consulted.map(function(c){return c.Employee_ID;});
-        var informedIds = raci.informed.map(function(i){return i.Employee_ID;});
-        Array.prototype.forEach.call(document.getElementById('tmConsulted').options, function(o){ o.selected = consultedIds.indexOf(o.value)!==-1; });
-        Array.prototype.forEach.call(document.getElementById('tmInformed').options, function(o){ o.selected = informedIds.indexOf(o.value)!==-1; });
-      });
-    }
-  }, 0);
-}
-function onTMPicChange(){
-  var picId = document.getElementById('tmPrimary').value;
-  var emp = CACHE.employees.filter(function(e){ return String(e.Employee_ID)===String(picId); })[0];
-  document.getElementById('tmDept').value = emp ? (emp.Department||'') : '';
-  document.getElementById('tmPos').value = emp ? (emp.Position||'') : '';
-}
-function renderTaskMasterFreqFields(existing){
-  var type = document.getElementById('tmType').value;
-  var wrap = document.getElementById('tmFreqWrap');
-  if(type === 'WEEKLY'){
-    var days = ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu'];
-    wrap.innerHTML = '<div class="formrow"><label>Hari (Weekly)</label><select class="input" id="tmDow">' +
-      days.map(function(d,i){ return '<option value="'+(i+1)+'"'+(existing && Number(existing.Day_Of_Week)===(i+1)?' selected':'')+'>'+d+'</option>'; }).join('') + '</select></div>';
-  } else if(type === 'MONTHLY'){
-    wrap.innerHTML = '<div class="formrow"><label>Tanggal (Monthly, 1-31)</label><input type="number" min="1" max="31" class="input" id="tmDom" value="'+(existing&&existing.Day_Of_Month?existing.Day_Of_Month:1)+'"></div>';
-  } else {
-    wrap.innerHTML = '';
-  }
-}
-function submitTaskMasterForm(taskId){
-  var type = document.getElementById('tmType').value;
-  var data = { Task_Name: document.getElementById('tmName').value, Department: document.getElementById('tmDept').value,
-    Position: document.getElementById('tmPos').value,
-    Schedule_Type: type, Task_Type: document.getElementById('tmTaskType').value,
-    Frequency: document.getElementById('tmFrequency').value, Task_Category: document.getElementById('tmCat').value,
-    Day_Of_Week: type==='WEEKLY' ? document.getElementById('tmDow').value : '',
-    Day_Of_Month: type==='MONTHLY' ? document.getElementById('tmDom').value : '',
-    Primary_PIC_ID: document.getElementById('tmPrimary').value, Backup_PIC_ID: document.getElementById('tmBackup').value,
-    Start_Time: document.getElementById('tmStart').value, Due_Time: document.getElementById('tmDue').value,
-    Required: document.getElementById('tmRequired').checked, Photo_Required: document.getElementById('tmPhotoReq').checked,
-    Sort_Order: document.getElementById('tmSort').value,
-    Task_Item: document.getElementById('tmItem').value,
-    Description: document.getElementById('tmDesc').value,
-    Output: document.getElementById('tmOutput').value,
-    Authority_Level: document.getElementById('tmAuthLevel').value,
-    Authority_Limit: document.getElementById('tmAuthLimit').value,
-    Spending_Limit: document.getElementById('tmSpendLimit').value,
-    Escalation_Enabled: document.getElementById('tmEscEnabled').checked,
-    Escalation_Trigger: document.getElementById('tmEscTrigger').value.trim(),
-    Escalation_To: document.getElementById('tmEscTo').value,
-    Escalation_Time_Limit: document.getElementById('tmEscTimeLimit').value,
-    SOP_Reference: document.getElementById('tmSopRef').value.trim(),
-    Work_Instruction: document.getElementById('tmWorkInstruction').value.trim(),
-    Tools_Equipment: document.getElementById('tmTools').value.trim(),
-    Required_Resources: document.getElementById('tmResources').value.trim(),
-    Safety_Instruction: document.getElementById('tmSafety').value.trim() };
-  if(!data.Task_Name){ toast('WARNING','Nama Task wajib diisi.'); return; }
-  var accountableId = document.getElementById('tmAccountable').value;
-  var consultedIds = Array.prototype.map.call(document.getElementById('tmConsulted').selectedOptions, function(o){return o.value;});
-  var informedIds = Array.prototype.map.call(document.getElementById('tmInformed').selectedOptions, function(o){return o.value;});
-  var p = taskId ? call('updateTaskMaster', STATE.token, taskId, data) : call('addTaskMaster', STATE.token, data);
-  p.then(function(savedTask){
-    var finalTaskId = taskId || savedTask.Task_ID;
-    return Promise.all([
-      call('setTaskAccountable', STATE.token, finalTaskId, accountableId),
-      call('setRaciConsultedInformed', STATE.token, finalTaskId, consultedIds, informedIds)
-    ]);
-  }).then(function(){ toast('SUCCESS','Task master & RACI tersimpan.'); closeModal(); loadTaskMasterTable(); });
 }
 function deactivateTM(taskId){
   confirmAction('Nonaktifkan task master ini?', function(){
@@ -2558,26 +3080,6 @@ function loadAssets(){
     document.getElementById('astTableWrap').innerHTML = '<table class="tbl"><thead><tr><th>Kode</th><th>Nama</th><th>Kategori</th><th>Lokasi</th><th>Kondisi</th><th>Status</th><th>Aksi</th></tr></thead><tbody>' +
       (rows || '<tr><td colspan="7" class="empty-state">Belum ada asset.</td></tr>') + '</tbody></table>';
   });
-}
-function openAssetForm(assetId){
-  var existing = assetId ? CACHE.assets.filter(function(a){ return String(a.Asset_ID)===String(assetId); })[0] : null;
-  var body = '<div class="formrow"><label>Kode Asset</label><input class="input" id="astCode" value="'+(existing?esc(existing.Asset_Code):'')+'"></div>' +
-    '<div class="formrow"><label>Nama Asset</label><input class="input" id="astName" value="'+(existing?esc(existing.Asset_Name):'')+'"></div>' +
-    '<div class="formrow"><label>Kategori</label><input class="input" id="astCat" value="'+(existing?esc(existing.Category):'')+'"></div>' +
-    '<div class="formrow"><label>Lokasi</label><input class="input" id="astLoc" value="'+(existing?esc(existing.Location):'')+'"></div>' +
-    '<div class="formrow"><label>Tanggal Beli</label><input type="date" class="input" id="astPdate" value="'+(existing?esc(existing.Purchase_Date).substring(0,10):'')+'"></div>' +
-    '<div class="formrow"><label>Harga Beli</label><input type="number" class="input" id="astCost" value="'+(existing?existing.Purchase_Cost:0)+'"></div>' +
-    '<div class="formrow"><label>Kondisi</label><select class="input" id="astCond"><option value="GOOD">GOOD</option><option value="FAIR">FAIR</option><option value="DAMAGED">DAMAGED</option></select></div>' +
-    '<div class="formrow"><label>Deskripsi</label><textarea class="input" id="astDesc">'+(existing?esc(existing.Description):'')+'</textarea></div>';
-  openModal(existing ? 'Edit Asset' : 'Tambah Asset', body, '<button class="btn secondary" onclick="closeModal()">Batal</button><button class="btn" onclick="submitAssetForm(\''+(assetId||'')+'\')">Simpan</button>');
-}
-function submitAssetForm(assetId){
-  var data = { Asset_Code: document.getElementById('astCode').value, Asset_Name: document.getElementById('astName').value,
-    Category: document.getElementById('astCat').value, Location: document.getElementById('astLoc').value,
-    Purchase_Date: document.getElementById('astPdate').value, Purchase_Cost: document.getElementById('astCost').value,
-    Condition: document.getElementById('astCond').value, Description: document.getElementById('astDesc').value };
-  var p = assetId ? call('updateAsset', STATE.token, assetId, data) : call('addAsset', STATE.token, data);
-  p.then(function(){ toast('SUCCESS','Asset tersimpan.'); closeModal(); loadAssets(); });
 }
 function openAssetDetail(assetId){
   call('getAssetDetail', STATE.token, assetId).then(function(d){
