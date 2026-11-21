@@ -273,6 +273,29 @@ table.tbl tr:hover td{background:#fafbff;}
   .topbar .userchip #userName{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .topbar .logoutBtn{padding:6px 10px; font-size:12px;}
 }
+
+/* ---------- BOTTOM NAV (navigasi cepat, hanya tampil di HP/tablet kecil) ---------- */
+.bottom-nav{display:none;}
+@media(max-width:820px){
+  .bottom-nav{
+    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:150;
+    background:var(--card); border-top:1px solid var(--border);
+    box-shadow:0 -2px 10px rgba(20,30,60,0.08);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .bottom-nav .bn-item{
+    flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:2px; padding:7px 2px 6px; cursor:pointer; color:var(--muted);
+    font-size:10.5px; font-weight:600; -webkit-tap-highlight-color:transparent; user-select:none;
+  }
+  .bottom-nav .bn-item .bn-ico{font-size:20px; line-height:1;}
+  .bottom-nav .bn-item .bn-lbl{max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .bottom-nav .bn-item.active{color:var(--accent);}
+  .bottom-nav .bn-item.active .bn-ico{transform:translateY(-1px);}
+  body.has-bottom-nav .content{padding-bottom:calc(78px + env(safe-area-inset-bottom));}
+  body.has-bottom-nav .toast-container{top:auto; bottom:calc(76px + env(safe-area-inset-bottom));}
+  body.has-bottom-nav #pwaInstallBanner{bottom:calc(64px + env(safe-area-inset-bottom));}
+}
 .att-grid-wrap{overflow:auto; max-height:70vh; border:1px solid #e5e7ef; border-radius:10px;}
 .att-grid{border-collapse:collapse; font-size:12px; width:100%;}
 .att-grid th, .att-grid td{border:1px solid #e5e7ef; padding:0; text-align:center;}
@@ -381,6 +404,7 @@ html[data-theme="dark"] .shift-row-dirty{background:rgba(255,193,7,0.08);}
     <div class="content" id="content"></div>
   </div>
 </div>
+<nav class="bottom-nav" id="bottomNav" aria-label="Navigasi cepat"></nav>
 </div>
 
 <div class="modal-overlay" id="modalOverlay">
@@ -715,6 +739,7 @@ function doLogin(){
     document.getElementById('app').style.display = 'block';
     loadAppMeta().then(function(){
       buildSidebar();
+      buildBottomNav();
       buildTopbarUser();
       navigate('dashboard');
       if(res.data.mustChangePassword){ showChangePasswordModal(true); }
@@ -772,6 +797,7 @@ function attemptResumeSession_(){
     document.getElementById('app').style.display = 'block';
     loadAppMeta().then(function(){
       buildSidebar();
+      buildBottomNav();
       buildTopbarUser();
       navigate('dashboard');
     });
@@ -844,6 +870,42 @@ function buildSidebar(){
   document.getElementById('navContainer').innerHTML = html;
 }
 
+
+/**
+ * Bottom navigation (navigasi cepat) untuk tampilan HP. Hanya menampilkan menu yang
+ * memang tersedia untuk role yang sedang login (mengikuti getEffectiveMenu_), sehingga
+ * pembatasan menu Karyawan dari Settings tetap berlaku. Ikon ikut pengaturan Ikon Menu.
+ */
+var BOTTOM_NAV_IDS = [
+  { id: 'attendance', label: 'Attendance' },
+  { id: 'dailytask', label: 'Daily Task' },
+  { id: 'discipline', label: 'Disiplin' },
+  { id: 'leaderboard', label: 'Leaderboard' },
+  { id: 'report', label: 'Report' }
+];
+function buildBottomNav(){
+  var nav = document.getElementById('bottomNav');
+  if(!nav) return;
+  var available = {};
+  getEffectiveMenu_(STATE.role).forEach(function(item){ if(!item.group) available[item.id] = item; });
+  var html = '';
+  BOTTOM_NAV_IDS.forEach(function(b){
+    var item = available[b.id];
+    if(!item) return;
+    var ico = (APP_META.menuIcons && APP_META.menuIcons[b.id]) || item.ico;
+    html += '<div class="bn-item" data-id="'+b.id+'" onclick="navigate(\''+b.id+'\')"><span class="bn-ico">'+ico+'</span><span class="bn-lbl">'+esc(b.label)+'</span></div>';
+  });
+  nav.innerHTML = html;
+  nav.style.display = html ? '' : 'none';
+  document.body.classList.toggle('has-bottom-nav', !!html);
+  highlightBottomNav_(STATE.currentSection);
+}
+function highlightBottomNav_(sectionId){
+  document.querySelectorAll('#bottomNav .bn-item').forEach(function(n){
+    n.classList.toggle('active', n.getAttribute('data-id') === sectionId);
+  });
+}
+
 function buildTopbarUser(){
   document.getElementById('userName').textContent = STATE.name || STATE.username;
   document.getElementById('userRole').textContent = STATE.role;
@@ -894,6 +956,7 @@ function navigate(sectionId){
   }
   STATE.currentSection = sectionId;
   document.querySelectorAll('.navitem').forEach(function(n){ n.classList.toggle('active', n.getAttribute('data-id') === sectionId); });
+  highlightBottomNav_(sectionId);
   document.getElementById('topbarTitle').textContent = SECTION_TITLE[sectionId] || sectionId;
   document.getElementById('sidebar').classList.remove('open');
   var content = document.getElementById('content');
