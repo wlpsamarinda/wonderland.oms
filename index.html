@@ -2102,26 +2102,34 @@ function downloadTextFile(filename, content, mime){
   setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
 }
 function csvTextToAoa_(csv){
-  return csv.split(/\r?\n/).filter(function(l){ return l.length; }).map(function(line){
-    // simple CSV split that respects quoted commas
-    var result = []; var cur = ''; var inQ = false;
-    for(var i=0;i<line.length;i++){
-      var ch = line[i];
-      if(ch === '"'){ if(inQ && line[i+1]=== '"'){ cur+='"'; i++; } else { inQ = !inQ; } }
-      else if(ch === ',' && !inQ){ result.push(cur); cur=''; }
-      else cur += ch;
-    }
-    result.push(cur);
-    return result;
-  });
+  // Parser CSV yang benar: koma dan baris baru di dalam tanda kutip tetap menjadi satu sel.
+  var rows = [], row = [], cur = '', inQ = false;
+  for(var i = 0; i < csv.length; i++){
+    var ch = csv[i];
+    if(inQ){
+      if(ch === '"'){ if(csv[i + 1] === '"'){ cur += '"'; i++; } else { inQ = false; } }
+      else { cur += ch; }
+    } else if(ch === '"'){ inQ = true; }
+    else if(ch === ','){ row.push(cur); cur = ''; }
+    else if(ch === '\n' || ch === '\r'){
+      if(ch === '\r' && csv[i + 1] === '\n') i++;
+      row.push(cur); cur = ''; rows.push(row); row = [];
+    } else { cur += ch; }
+  }
+  if(cur !== '' || row.length){ row.push(cur); rows.push(row); }
+  return rows.filter(function(r){ return r.join('').length; });
 }
 function downloadImportTemplate(type){
   call('getImportTemplate', STATE.token, type).then(function(r){
     var aoa = csvTextToAoa_(r.csv);
-    var ws = XLSX.utils.aoa_to_sheet(aoa);
-    var wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Template');
-    XLSX.writeFile(wb, r.filename.replace(/\.csv$/i, '.xlsx'));
+    return xlEnsureLib_().then(function(){
+      var wb = buildTemplateWorkbook_(ExcelJS, type, aoa, { company: APP_META.companyName || APP_META.appName || '' });
+      return xlSave_(wb, r.filename.replace(/\.csv$/i, '.xlsx'));
+    });
+  }).then(function(){
+    toast('SUCCESS', 'Template Excel berhasil diunduh. Baca sheet "Petunjuk" sebelum mengisi.');
+  }, function(err){
+    if(err && err.message && !err.success){ toast('ERROR', err.message); }
   });
 }
 function openImportModal(type){
@@ -2194,10 +2202,426 @@ function openExportModal(reportKey){
 function runExport(reportKey){
   var format = document.getElementById('expFormat').value;
   call('generateReport', STATE.token, reportKey, format, '', '').then(function(r){
-    downloadBase64File(r.base64, r.filename, r.mimeType);
-    document.getElementById('expResult').innerHTML = 'File "'+esc(r.filename)+'" sedang diunduh ke perangkat Anda...';
-    toast('SUCCESS','Report berhasil dibuat & diunduh ke perangkat.');
+    return deliverReportFile_(r).then(function(){
+      document.getElementById('expResult').innerHTML = 'File "'+esc(r.filename)+'" sedang diunduh ke perangkat Anda...';
+      toast('SUCCESS','Report berhasil dibuat & diunduh ke perangkat.');
+    });
   });
+}
+
+/*************************************************************************************************
+ * XLSX STYLING (ExcelJS) - semua file Excel yang dihasilkan aplikasi (hasil export & template import)
+ * memakai gaya yang sama: judul, header berwarna, baris selang-seling, border tipis, filter, freeze,
+ * format angka/tanggal, warna status, dan pengaturan cetak.
+ * Fungsi build*_ bersifat murni (menerima ExcelJS + data, mengembalikan workbook) agar mudah diuji.
+ *************************************************************************************************/
+var XL_ = {
+  navy: 'FF1E3A5F', blue: 'FF2F5597', zebra: 'FFF4F7FB', border: 'FFD5DCE8', text: 'FF1F2937', muted: 'FF64748B',
+  red: 'FFB42318', slate: 'FF64748B', white: 'FFFFFFFF', totalBg: 'FFE8EEF7', inputBorder: 'FFC9D2E0', noteBg: 'FFFFF8E1',
+  font: 'Calibri'
+};
+var XL_MIME_ = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+function xlBorder_(argb){ var s = { style: 'thin', color: { argb: argb } }; return { top: s, left: s, bottom: s, right: s }; }
+function xlFill_(argb){ return { type: 'pattern', pattern: 'solid', fgColor: { argb: argb } }; }
+function xlPad_(n){ return ('0' + n).slice(-2); }
+function xlFmtDate_(iso){ var m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[3] + '/' + m[2] + '/' + m[1] : String(iso || ''); }
+function xlNow_(){ var d = new Date(); return xlPad_(d.getDate()) + '/' + xlPad_(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + xlPad_(d.getHours()) + ':' + xlPad_(d.getMinutes()); }
+function xlSheetName_(s){ return String(s || 'Data').replace(/[\\\/\?\*\[\]:]/g, ' ').trim().substring(0, 31) || 'Data'; }
+
+/* Warna status (nilai sudah diterjemahkan ke Indonesia oleh server). [latar, teks] */
+var XL_STATUS_ = {
+  green: ['FFE6F4EA', 'FF137333'], amber: ['FFFEF3C7', 'FF92400E'], red: ['FFFDE8E7', 'FFB42318'], gray: ['FFF1F5F9', 'FF475569']
+};
+var XL_STATUS_MAP_ = {
+  'AKTIF': 'green', 'SELESAI': 'green', 'HADIR': 'green', 'GOOD': 'green', 'DISETUJUI': 'green', 'APPROVED': 'green', 'DONE': 'green', 'CLOSED': 'green', 'BAIK': 'green',
+  'MENUNGGU': 'amber', 'SEDANG DIKERJAKAN': 'amber', 'TELAT': 'amber', 'IZIN': 'amber', 'CUTI': 'amber', 'SAKIT': 'amber', 'PENDING': 'amber', 'FAIR': 'amber', 'DILEWATI': 'amber', '1/2 HARI': 'amber', 'OPEN': 'amber', 'POSTPONED': 'amber',
+  'TIDAK AKTIF': 'red', 'BERMASALAH': 'red', 'TERLAMBAT': 'red', 'ALPHA/MANGKIR': 'red', 'DAMAGED': 'red', 'REJECTED': 'red', 'DITOLAK': 'red', 'RUSAK': 'red',
+  'LIBUR/OFF': 'gray', 'BELUM BEKERJA': 'gray', 'INACTIVE': 'gray'
+};
+
+/** Menganalisis satu kolom: tipe (text|number|date|datetime|time|bool|status), format, lebar, wrap. */
+function xlAnalyzeColumn_(header, values){
+  var filled = values.filter(function(v){ return v !== '' && v !== null && v !== undefined; });
+  var info = { type: 'text', fmt: null, currency: false, wrap: false, width: 12 };
+  var maxLen = 0, hasNl = false;
+  filled.forEach(function(v){
+    var str = String(v); if(str.indexOf('\n') !== -1) hasNl = true;
+    str.split('\n').forEach(function(line){ if(line.length > maxLen) maxLen = line.length; });
+  });
+  var h = String(header || '');
+  var idLike = /(^|\s)(id|kode|code)(\s|$)|telepon|no\.?\s?hp|phone|url|foto|email/i.test(h);
+  if(filled.length){
+    var allDate = filled.every(function(v){ return /^\d{4}-\d{2}-\d{2}$/.test(String(v)); });
+    var allDt = filled.every(function(v){ return /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(String(v)); });
+    var allTime = filled.every(function(v){ return /^\d{1,2}:\d{2}(:\d{2})?$/.test(String(v)); });
+    var allBool = filled.every(function(v){ return /^(true|false|ya|tidak)$/i.test(String(v)) || v === true || v === false; });
+    var allNum = !idLike && filled.every(function(v){
+      if(typeof v === 'number') return true;
+      var s = String(v).trim();
+      return /^-?\d+([.,]\d+)?$/.test(s) && !/^0\d/.test(s);
+    });
+    if(allDate){ info.type = 'date'; info.fmt = 'dd/mm/yyyy'; }
+    else if(allDt){ info.type = 'datetime'; info.fmt = 'dd/mm/yyyy hh:mm'; }
+    else if(allTime){ info.type = 'time'; }
+    else if(allBool){ info.type = 'bool'; }
+    else if(allNum){
+      info.type = 'number';
+      var plain = /tahun|urutan|bulan|menit|jam\b|hari|no\b|tanggal/i.test(h);
+      var dec = filled.some(function(v){ return /[.,]\d/.test(String(v)); });
+      info.currency = /harga|biaya|gaji|nilai|limit|cost|amount|rp|tunjangan|potongan|lembur/i.test(h) && !plain;
+      info.fmt = plain ? '0' : (dec ? '#,##0.00' : '#,##0');
+    }
+    else if(/status|kondisi/i.test(h)){ info.type = 'status'; }
+  }
+  info.wrap = hasNl || maxLen > 42;
+  var headLen = h.length * 1.15 + 5;
+  var contentLen = Math.min(maxLen, info.wrap ? 46 : 55) + 3;
+  if(info.type === 'date') contentLen = 12;
+  if(info.type === 'datetime') contentLen = 17;
+  info.width = Math.max(9, Math.min(60, Math.max(headLen, contentLen)));
+  return info;
+}
+
+function xlCellValue_(info, v){
+  if(v === '' || v === null || v === undefined) return null;
+  if(info.type === 'date'){ var m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/); return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])); }
+  if(info.type === 'datetime'){ var d = String(v).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/); return new Date(Date.UTC(+d[1], +d[2] - 1, +d[3], +d[4], +d[5])); }
+  if(info.type === 'number'){ return typeof v === 'number' ? v : Number(String(v).replace(',', '.')); }
+  if(info.type === 'bool'){ var s = String(v).toLowerCase(); return (s === 'true' || s === 'ya') ? 'YA' : (s === 'false' || s === 'tidak') ? 'TIDAK' : String(v); }
+  return String(v);
+}
+
+/**
+ * x = { title, headers:[], rows:[[]], periodStart, periodEnd, generatedBy, company }
+ */
+function buildExportWorkbook_(ExcelJS, x){
+  var wb = new ExcelJS.Workbook();
+  var company = x.company || '';
+  wb.creator = company || 'Wonderland OMS'; wb.created = new Date();
+  var ws = wb.addWorksheet(xlSheetName_(x.title), { properties: { tabColor: { argb: XL_.navy } } });
+  var headers = x.headers || [], rows = x.rows || [], n = Math.max(headers.length, 1);
+
+  var period = (x.periodStart && x.periodEnd) ? 'Periode: ' + xlFmtDate_(x.periodStart) + ' s/d ' + xlFmtDate_(x.periodEnd) : 'Periode: Semua data';
+  var sub = period + '   •   Dicetak: ' + xlNow_() + (x.generatedBy ? '   •   Oleh: ' + x.generatedBy : '');
+
+  function band(r, text, font, height){
+    ws.mergeCells(r, 1, r, n);
+    var c = ws.getCell(r, 1); c.value = text; c.font = font; c.alignment = { vertical: 'middle', horizontal: 'left' };
+    ws.getRow(r).height = height;
+  }
+  band(1, String(company || '').toUpperCase(), { name: XL_.font, size: 10, bold: true, color: { argb: XL_.blue } }, 18);
+  band(2, x.title || 'Laporan', { name: XL_.font, size: 18, bold: true, color: { argb: XL_.navy } }, 30);
+  band(3, sub, { name: XL_.font, size: 10, color: { argb: XL_.muted } }, 18);
+  ws.getRow(4).height = 8;
+  var HDR = 5;
+
+  if(!headers.length){
+    ws.mergeCells(HDR, 1, HDR, n);
+    var e = ws.getCell(HDR, 1); e.value = 'Tidak ada data pada periode ini.';
+    e.font = { name: XL_.font, size: 11, italic: true, color: { argb: XL_.muted } };
+    e.alignment = { horizontal: 'center', vertical: 'middle' }; e.fill = xlFill_(XL_.zebra); e.border = xlBorder_(XL_.border);
+    ws.getRow(HDR).height = 34; ws.getColumn(1).width = 60;
+    ws.views = [{ showGridLines: false }];
+    return wb;
+  }
+
+  // analisis kolom
+  var infos = headers.map(function(h, ci){ return xlAnalyzeColumn_(h, rows.map(function(r){ return r[ci]; })); });
+  var hr = ws.getRow(HDR); hr.height = 34;
+  headers.forEach(function(h, ci){
+    var c = hr.getCell(ci + 1); c.value = h;
+    c.font = { name: XL_.font, size: 10.5, bold: true, color: { argb: XL_.white } };
+    c.fill = xlFill_(XL_.navy);
+    c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    c.border = { top: { style: 'thin', color: { argb: XL_.navy } }, bottom: { style: 'medium', color: { argb: XL_.blue } }, left: { style: 'thin', color: { argb: XL_.blue } }, right: { style: 'thin', color: { argb: XL_.blue } } };
+    ws.getColumn(ci + 1).width = infos[ci].width;
+  });
+
+  rows.forEach(function(r, ri){
+    var row = ws.getRow(HDR + 1 + ri);
+    headers.forEach(function(h, ci){
+      var info = infos[ci], c = row.getCell(ci + 1);
+      c.value = xlCellValue_(info, r[ci]);
+      c.font = { name: XL_.font, size: 10, color: { argb: XL_.text } };
+      c.border = xlBorder_(XL_.border);
+      if(ri % 2 === 1) c.fill = xlFill_(XL_.zebra);
+      var horiz = (info.type === 'number') ? 'right' : (info.type === 'text' ? 'left' : 'center');
+      if(info.type === 'number' && info.fmt === '0') horiz = 'center';
+      c.alignment = { vertical: info.wrap ? 'top' : 'middle', horizontal: horiz, wrapText: info.wrap, indent: (horiz === 'center') ? 0 : 1 };
+      if(info.fmt) c.numFmt = info.fmt;
+      if(info.type === 'status' && c.value !== null){
+        var tone = XL_STATUS_MAP_[String(c.value).toUpperCase()];
+        if(tone){ c.fill = xlFill_(XL_STATUS_[tone][0]); c.font = { name: XL_.font, size: 10, bold: true, color: { argb: XL_STATUS_[tone][1] } }; }
+      }
+    });
+    if(!row.height) row.height = undefined;
+  });
+
+  // baris total
+  var last = HDR + rows.length, tr = ws.getRow(last + 1); tr.height = 22;
+  headers.forEach(function(h, ci){
+    var c = tr.getCell(ci + 1);
+    c.fill = xlFill_(XL_.totalBg);
+    c.font = { name: XL_.font, size: 10.5, bold: true, color: { argb: XL_.navy } };
+    c.border = { top: { style: 'medium', color: { argb: XL_.navy } }, bottom: { style: 'thin', color: { argb: XL_.border } }, left: { style: 'thin', color: { argb: XL_.border } }, right: { style: 'thin', color: { argb: XL_.border } } };
+    c.alignment = { vertical: 'middle', horizontal: infos[ci].type === 'number' ? 'right' : 'left', indent: 1 };
+    if(ci === 0){ c.value = 'Total: ' + rows.length + ' data'; }
+    else if(infos[ci].currency && rows.length){
+      var col = ws.getColumn(ci + 1).letter, sum = 0;
+      rows.forEach(function(r){ var v = r[ci]; if(v !== '' && v !== null && v !== undefined) sum += Number(String(v).replace(',', '.')) || 0; });
+      c.value = { formula: 'SUM(' + col + (HDR + 1) + ':' + col + last + ')', result: sum };
+      c.numFmt = infos[ci].fmt;
+    }
+  });
+
+  ws.autoFilter = { from: { row: HDR, column: 1 }, to: { row: HDR, column: n } };
+  ws.views = [{ state: 'frozen', ySplit: HDR, xSplit: 0, showGridLines: false, activeCell: 'A' + (HDR + 1) }];
+  ws.pageSetup = { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true,
+    margins: { left: 0.4, right: 0.4, top: 0.6, bottom: 0.7, header: 0.3, footer: 0.3 }, printTitlesRow: HDR + ':' + HDR };
+  ws.headerFooter = { oddFooter: '&L&8' + String(company || '').replace(/&/g, '&&') + '&C&8Halaman &P dari &N&R&8Dicetak &D' };
+  return wb;
+}
+
+/* ---------------------------------- TEMPLATE IMPORT ---------------------------------- */
+var TPL_TITLE_ = { employees: 'Master Karyawan', tasks: 'Master Task', assets: 'Master Asset', attendance: 'Attendance', overtime: 'Overtime' };
+var TPL_REQUIRED_ = {
+  employees: ['Employee_Code', 'Name'], tasks: ['Task_Name', 'Schedule_Type'], assets: ['Asset_Name'],
+  attendance: ['Date', 'Employee_ID', 'Status'], overtime: ['Date', 'Employee_ID', 'Start_Time', 'End_Time']
+};
+var TPL_AUTO_ = ['Created_At', 'Updated_At'];
+var TPL_TEXT_COLS_ = ['Join_Date', 'Purchase_Date', 'Warranty_End', 'Date', 'Start_Time', 'End_Time', 'Due_Time', 'Check_In', 'Check_Out', 'Shift_Start', 'Shift_End', 'Approval_Date', 'Phone', 'Employee_Code', 'Asset_Code'];
+var TPL_OPTIONS_ = {
+  Schedule_Type: ['DAILY', 'WEEKLY', 'MONTHLY'], Task_Type: ['RECURRING', 'ONE_TIME', 'AD_HOC', 'IMPROVEMENT'],
+  Frequency: ['DAILY', 'WEEKLY', 'MONTHLY', 'NONE'], Task_Category: ['PREPARATION', 'OPERATION', 'CLOSING', 'IMPROVEMENT', 'OTHER'],
+  Day_Of_Week: ['1', '2', '3', '4', '5', '6', '7'], Required: ['TRUE', 'FALSE'], Photo_Required: ['TRUE', 'FALSE'], Escalation_Enabled: ['TRUE', 'FALSE'],
+  Authority_Level: ['STAFF', 'SUPERVISOR', 'MANAGER', 'OWNER'], Escalation_To: ['SUPERVISOR', 'MANAGER', 'OWNER', 'ADMIN'],
+  Condition: ['GOOD', 'FAIR', 'DAMAGED'], Status: ['ACTIVE', 'INACTIVE']
+};
+var TPL_OPTIONS_BY_TYPE_ = {
+  attendance: { Status: ['P', 'T', 'O', 'I', 'S', 'A', 'C', 'N', 'B'] },
+  overtime: { Status: ['PENDING', 'APPROVED', 'REJECTED'] }
+};
+var TPL_DOCS_ = {
+  Employee_ID: ['ID Karyawan', 'Kosongkan untuk data baru (dibuat otomatis). Isi ID yang sudah ada untuk memperbarui data karyawan tersebut.'],
+  Employee_Code: ['Kode Karyawan', 'Kode unik karyawan, mis. EMP-001.'],
+  Name: ['Nama Lengkap', 'Nama karyawan.'],
+  Department: ['Departemen', 'Nama departemen, mis. Operation.'],
+  Position: ['Jabatan', 'Jabatan/posisi karyawan.'],
+  Phone: ['No. HP', 'Tulis sebagai teks agar angka 0 di depan tidak hilang.'],
+  Email: ['Email', 'Alamat email (opsional).'],
+  Join_Date: ['Tanggal Bergabung', 'Format YYYY-MM-DD, mis. 2026-01-31.'],
+  Default_Backup_ID: ['ID Karyawan Pengganti', 'ID karyawan yang menjadi pengganti default (opsional).'],
+  Status: ['Status', 'Pilih dari daftar. Kosong = default sistem.'],
+  Photo_URL: ['URL Foto', 'Opsional. Biasanya diisi otomatis oleh aplikasi.'],
+  Created_At: ['Dibuat Pada', 'Otomatis. Biarkan kosong.'],
+  Updated_At: ['Diperbarui Pada', 'Otomatis. Biarkan kosong.'],
+  Task_ID: ['ID Task', 'Kosongkan untuk task baru (dibuat otomatis). Isi ID yang sudah ada untuk memperbarui task.'],
+  Task_Name: ['Nama Task', 'Nama tugas yang akan dikerjakan.'],
+  Task_Item: ['Task Item (Checklist)', 'Daftar item checklist. Satu item per baris: tekan Alt+Enter di dalam sel untuk baris baru.'],
+  Schedule_Type: ['Jadwal (Engine)', 'DAILY = tiap hari, WEEKLY = tiap minggu (isi Day_Of_Week), MONTHLY = tiap bulan (isi Day_Of_Month).'],
+  Task_Type: ['Sifat Tugas', 'Pilih dari daftar.'],
+  Frequency: ['Frekuensi', 'Label frekuensi tugas. Umumnya sama dengan Schedule_Type.'],
+  Task_Category: ['Tahap Kerja', 'Pilih dari daftar (opsional).'],
+  Day_Of_Week: ['Hari (untuk WEEKLY)', '1 = Senin, 2 = Selasa, ... 7 = Minggu.'],
+  Day_Of_Month: ['Tanggal (untuk MONTHLY)', 'Angka 1 sampai 31.'],
+  Primary_PIC_ID: ['PIC Utama', 'ID karyawan penanggung jawab (lihat menu Employees).'],
+  Backup_PIC_ID: ['PIC Cadangan', 'ID karyawan pengganti (opsional).'],
+  Start_Time: ['Jam Mulai', 'Format HH:mm (24 jam), mis. 08:00.'],
+  Due_Time: ['Jam Batas Waktu', 'Format HH:mm (24 jam), mis. 08:30.'],
+  Required: ['Wajib', 'TRUE atau FALSE.'],
+  Photo_Required: ['Wajib Foto', 'TRUE atau FALSE.'],
+  Description: ['Deskripsi', 'Keterangan tambahan (opsional).'],
+  Output: ['Output yang Diharapkan', 'Hasil yang diharapkan dari tugas ini.'],
+  Sort_Order: ['Urutan Tampil', 'Angka; makin kecil makin atas.'],
+  Accountable_ID: ['Accountable (RACI)', 'ID karyawan yang bertanggung jawab atas hasil (opsional).'],
+  Authority_Level: ['Level Kewenangan', 'Pilih dari daftar (opsional).'],
+  Authority_Limit: ['Batas Kewenangan', 'Angka bebas sesuai konteks task (opsional).'],
+  Spending_Limit: ['Batas Pengeluaran (Rp)', 'Angka tanpa titik/koma (opsional).'],
+  Escalation_Enabled: ['Eskalasi Aktif', 'TRUE atau FALSE.'],
+  Escalation_Trigger: ['Pemicu Eskalasi', 'Kondisi yang memicu eskalasi (opsional).'],
+  Escalation_To: ['Eskalasi Kepada', 'Pilih dari daftar (opsional).'],
+  Escalation_Time_Limit: ['Batas Waktu Eskalasi (jam)', 'Angka (opsional).'],
+  SOP_Reference: ['Referensi SOP', 'Kode dokumen atau tautan SOP (opsional).'],
+  Work_Instruction: ['Petunjuk Kerja', 'Instruksi kerja singkat (opsional).'],
+  Tools_Equipment: ['Tools / Equipment', 'Peralatan yang dibutuhkan (opsional).'],
+  Required_Resources: ['Sumber Daya', 'Sumber daya yang dibutuhkan (opsional).'],
+  Safety_Instruction: ['Petunjuk Keselamatan', 'Instruksi keselamatan kerja (opsional).'],
+  KPI_ID: ['ID KPI', 'ID KPI terkait (opsional).'],
+  Asset_ID: ['ID Asset', 'Kosongkan untuk asset baru (dibuat otomatis).'],
+  Asset_Code: ['Kode Asset', 'Kode unik asset, mis. AST-001.'],
+  Asset_Name: ['Nama Asset', 'Nama asset/wahana.'],
+  Category: ['Kategori', 'Kategori asset, mis. Wahana.'],
+  Location: ['Lokasi', 'Lokasi asset, mis. Zona A.'],
+  Purchase_Date: ['Tanggal Pembelian', 'Format YYYY-MM-DD.'],
+  Purchase_Cost: ['Harga Beli (Rp)', 'Angka tanpa titik/koma, mis. 150000000.'],
+  Warranty_End: ['Garansi Berakhir', 'Format YYYY-MM-DD (opsional).'],
+  Condition: ['Kondisi', 'GOOD, FAIR, atau DAMAGED.'],
+  Attendance_ID: ['ID Absensi', 'Kosongkan untuk data baru (dibuat otomatis).'],
+  Date: ['Tanggal', 'Format YYYY-MM-DD.'],
+  Check_In: ['Jam Masuk', 'Format HH:mm.'],
+  Check_Out: ['Jam Pulang', 'Format HH:mm.'],
+  Late_Minutes: ['Menit Terlambat', 'Angka (opsional).'],
+  Notes: ['Catatan', 'Opsional.'],
+  Check_In_Photo: ['Foto Masuk', 'Opsional. Diisi otomatis oleh aplikasi.'],
+  Check_Out_Photo: ['Foto Pulang', 'Opsional. Diisi otomatis oleh aplikasi.'],
+  Shift_Start: ['Shift Mulai', 'Format HH:mm (opsional).'],
+  Shift_End: ['Shift Selesai', 'Format HH:mm (opsional).'],
+  Early_Minutes: ['Menit Pulang Cepat', 'Angka (opsional).'],
+  Overtime_Minutes: ['Menit Lembur', 'Angka (opsional).'],
+  Work_Duration_Minutes: ['Durasi Kerja (menit)', 'Angka (opsional).'],
+  Shortfall_Minutes: ['Kekurangan Jam (menit)', 'Angka (opsional).'],
+  Overtime_ID: ['ID Lembur', 'Kosongkan untuk data baru (dibuat otomatis).'],
+  End_Time: ['Jam Selesai', 'Format HH:mm.'],
+  Duration_Hours: ['Durasi (jam)', 'Angka, mis. 2 atau 1.5.'],
+  Reason: ['Alasan', 'Alasan lembur.'],
+  Approved_By: ['Disetujui Oleh', 'ID karyawan penyetuju (opsional).'],
+  Approval_Date: ['Tanggal Persetujuan', 'Opsional.']
+};
+var TPL_ATT_STATUS_ = 'P = Hadir, T = Telat, O = Libur/Off, I = Izin, S = Sakit, A = Alpha/Mangkir, C = Cuti, N = 1/2 Hari, B = Belum Bekerja.';
+var TPL_WIDTH_ = { Task_Name: 30, Task_Item: 42, Description: 32, Output: 32, Name: 26, Asset_Name: 26, Work_Instruction: 32, Safety_Instruction: 32, Escalation_Trigger: 30, Email: 26, Reason: 30, Notes: 28 };
+var TPL_ROWS_ = 300;
+
+/**
+ * aoa = [headers, contohBaris?] dari getImportTemplate. Sheet pertama "Template" (header di baris 1, persis nama kolom
+ * yang dibaca importer), sheet kedua "Petunjuk" (aturan + kamus kolom + contoh).
+ */
+function buildTemplateWorkbook_(ExcelJS, type, aoa, meta){
+  meta = meta || {};
+  var headers = aoa[0] || [], example = aoa[1] || [];
+  var required = TPL_REQUIRED_[type] || [], title = TPL_TITLE_[type] || type;
+  var wb = new ExcelJS.Workbook(); wb.creator = meta.company || 'Wonderland OMS'; wb.created = new Date();
+  var ws = wb.addWorksheet('Template', { properties: { tabColor: { argb: XL_.navy } } });
+  var opts = function(k){ return (TPL_OPTIONS_BY_TYPE_[type] && TPL_OPTIONS_BY_TYPE_[type][k]) || TPL_OPTIONS_[k]; };
+
+  var hr = ws.getRow(1); hr.height = 36;
+  headers.forEach(function(h, i){
+    var isReq = required.indexOf(h) !== -1, isAuto = TPL_AUTO_.indexOf(h) !== -1;
+    var c = hr.getCell(i + 1); c.value = h;
+    var bg = isReq ? XL_.red : (isAuto ? XL_.slate : XL_.navy);
+    c.fill = xlFill_(bg); c.font = { name: XL_.font, size: 10.5, bold: true, color: { argb: XL_.white } };
+    c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    c.border = xlBorder_(XL_.white);
+    var doc = TPL_DOCS_[h];
+    if(doc){
+      var o = opts(h);
+      c.note = { texts: [{ font: { name: XL_.font, size: 9, bold: true }, text: doc[0] + (isReq ? ' (WAJIB)' : '') + '\n' }, { font: { name: XL_.font, size: 9 }, text: doc[1] }], margins: { insetmode: 'auto' } };
+    }
+    var col = ws.getColumn(i + 1);
+    col.width = Math.max(TPL_WIDTH_[h] || 16, h.length * 1.1 + 4);
+    var textCol = TPL_TEXT_COLS_.indexOf(h) !== -1;
+    var wrap = h === 'Task_Item' || h === 'Work_Instruction' || h === 'Safety_Instruction' || h === 'Description' || h === 'Output';
+    var list = opts(h);
+    for(var r = 2; r <= TPL_ROWS_ + 1; r++){
+      var cell = ws.getCell(r, i + 1);
+      cell.border = xlBorder_(XL_.inputBorder);
+      cell.font = { name: XL_.font, size: 10, color: { argb: XL_.text } };
+      cell.alignment = { vertical: wrap ? 'top' : 'middle', horizontal: 'left', wrapText: wrap };
+      if(r % 2 === 1) cell.fill = xlFill_(XL_.zebra);
+      if(textCol) cell.numFmt = '@';
+      if(list){
+        cell.dataValidation = { type: 'list', allowBlank: true, formulae: ['"' + list.join(',') + '"'], showErrorMessage: true, errorStyle: 'warning',
+          errorTitle: 'Nilai tidak dikenal', error: 'Pilih salah satu: ' + list.join(', ') };
+      } else if(h === 'Day_Of_Month'){
+        cell.dataValidation = { type: 'whole', operator: 'between', allowBlank: true, formulae: [1, 31], showErrorMessage: true, errorTitle: 'Tanggal tidak valid', error: 'Isi angka 1 sampai 31.' };
+      }
+    }
+  });
+  ws.views = [{ state: 'frozen', ySplit: 1, xSplit: 0, showGridLines: true }];
+  ws.pageSetup = { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: '1:1' };
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: Math.max(headers.length, 1) } };
+
+  // ---- Sheet Petunjuk ----
+  var gs = wb.addWorksheet('Petunjuk', { properties: { tabColor: { argb: XL_.blue } } });
+  gs.views = [{ showGridLines: false }];
+  gs.columns = [{ width: 6 }, { width: 26 }, { width: 28 }, { width: 11 }, { width: 70 }, { width: 34 }];
+  function line(r, text, font, height, fill){
+    gs.mergeCells(r, 1, r, 6); var c = gs.getCell(r, 1); c.value = text; c.font = font;
+    c.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true }; if(fill) c.fill = xlFill_(fill); gs.getRow(r).height = height;
+  }
+  line(1, String(meta.company || '').toUpperCase(), { name: XL_.font, size: 10, bold: true, color: { argb: XL_.blue } }, 18);
+  line(2, 'Template Import ' + title, { name: XL_.font, size: 18, bold: true, color: { argb: XL_.navy } }, 30);
+  line(3, 'Baca panduan ini sebelum mengisi sheet "Template".', { name: XL_.font, size: 10, color: { argb: XL_.muted } }, 18);
+  gs.getRow(4).height = 8;
+  var steps = [
+    'Isi data pada sheet "Template", mulai dari baris ke-2. Satu baris = satu data. Baris yang kosong diabaikan.',
+    'JANGAN mengubah, menghapus, atau memindahkan baris 1 (nama kolom). Nama kolom dibaca langsung oleh sistem.',
+    'Warna judul kolom: MERAH = wajib diisi, BIRU TUA = opsional, ABU-ABU = otomatis (biarkan kosong).',
+    'Kolom ID dikosongkan untuk data baru (dibuat otomatis). Isi ID yang sudah ada untuk MEMPERBARUI data lama.',
+    'Kolom bertanda panah (dropdown) hanya menerima nilai dari daftar. Kolom tanggal dan jam berformat teks: tulis YYYY-MM-DD dan HH:mm.',
+    'Setelah selesai, simpan file (tetap .xlsx), lalu unggah melalui menu Import dan klik Preview untuk memeriksa sebelum Import Sekarang.'
+  ];
+  line(5, 'CARA PENGISIAN', { name: XL_.font, size: 11, bold: true, color: { argb: XL_.white } }, 22, XL_.navy);
+  var r0 = 6;
+  steps.forEach(function(s, i){
+    gs.getCell(r0 + i, 1).value = i + 1;
+    gs.getCell(r0 + i, 1).font = { name: XL_.font, size: 10, bold: true, color: { argb: XL_.blue } };
+    gs.getCell(r0 + i, 1).alignment = { vertical: 'top', horizontal: 'center' };
+    gs.mergeCells(r0 + i, 2, r0 + i, 6);
+    var c = gs.getCell(r0 + i, 2); c.value = s; c.font = { name: XL_.font, size: 10, color: { argb: XL_.text } };
+    c.alignment = { vertical: 'top', wrapText: true }; gs.getRow(r0 + i).height = 22;
+  });
+  var rt = r0 + steps.length + 1;
+  line(rt, 'KAMUS KOLOM', { name: XL_.font, size: 11, bold: true, color: { argb: XL_.white } }, 22, XL_.navy);
+  var th = gs.getRow(rt + 1); th.height = 24;
+  ['No', 'Kolom (baris 1)', 'Nama / Arti', 'Wajib', 'Isi yang diperbolehkan', 'Contoh'].forEach(function(t, i){
+    var c = th.getCell(i + 1); c.value = t; c.font = { name: XL_.font, size: 10, bold: true, color: { argb: XL_.navy } };
+    c.fill = xlFill_(XL_.totalBg); c.border = xlBorder_(XL_.border); c.alignment = { vertical: 'middle', horizontal: i === 0 || i === 3 ? 'center' : 'left' };
+  });
+  headers.forEach(function(h, i){
+    var r = rt + 2 + i, doc = TPL_DOCS_[h] || [h, ''], isReq = required.indexOf(h) !== -1, isAuto = TPL_AUTO_.indexOf(h) !== -1;
+    var o = opts(h), allowed = doc[1];
+    if(o){ allowed = (type === 'attendance' && h === 'Status') ? TPL_ATT_STATUS_ : 'Pilih: ' + o.join(' / ') + '. ' + (h === 'Status' ? '' : doc[1]); }
+    var vals = [i + 1, h, doc[0], isReq ? 'WAJIB' : (isAuto ? 'Otomatis' : 'Opsional'), allowed.trim(), example[i] !== undefined ? String(example[i]).replace(/^(EMP|TSK|AST|ATT|OT)-CONTOH$/, '') : ''];
+    vals.forEach(function(v, ci){
+      var c = gs.getCell(r, ci + 1); c.value = v;
+      c.font = { name: XL_.font, size: 10, color: { argb: XL_.text }, bold: ci === 1 || (ci === 3 && isReq) };
+      if(ci === 3 && isReq) c.font = { name: XL_.font, size: 10, bold: true, color: { argb: XL_.red } };
+      if(ci === 3 && isAuto) c.font = { name: XL_.font, size: 10, color: { argb: XL_.muted } };
+      c.border = xlBorder_(XL_.border); if(i % 2 === 1) c.fill = xlFill_(XL_.zebra);
+      c.alignment = { vertical: 'top', horizontal: (ci === 0 || ci === 3) ? 'center' : 'left', wrapText: true };
+    });
+  });
+  gs.pageSetup = { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+  wb.views = [{ activeTab: 0 }];
+  return wb;
+}
+
+/* ------------------------------ Pembungkus (browser) ------------------------------ */
+function xlSave_(wb, filename){
+  return wb.xlsx.writeBuffer().then(function(buf){
+    var blob = new Blob([buf], { type: XL_MIME_ });
+    var url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+  });
+}
+function xlEnsureLib_(){
+  if(typeof ExcelJS !== 'undefined') return Promise.resolve();
+  return new Promise(function(resolve, reject){
+    var s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js';
+    s.onload = function(){ resolve(); };
+    s.onerror = function(){ reject(new Error('Library Excel gagal dimuat. Periksa koneksi internet lalu coba lagi.')); };
+    document.head.appendChild(s);
+  });
+}
+function exportStyledXlsx_(data, filename){
+  return xlEnsureLib_().then(function(){
+    data.company = data.company || APP_META.companyName || APP_META.appName || '';
+    data.generatedBy = data.generatedBy || STATE.name || STATE.username || '';
+    return xlSave_(buildExportWorkbook_(ExcelJS, data), filename);
+  });
+}
+
+/** File report dari server: XLSX datang sebagai data mentah (xlsxData) lalu dibuat berstyle di perangkat; format lain base64. */
+function deliverReportFile_(r){
+  if(r.xlsxData){
+    return exportStyledXlsx_(r.xlsxData, r.filename).catch(function(err){ toast('ERROR', (err && err.message) || 'Gagal membuat file Excel.'); throw err; });
+  }
+  downloadBase64File(r.base64, r.filename, r.mimeType);
+  return Promise.resolve();
 }
 
 /*************************************************************************************************
@@ -3206,9 +3630,10 @@ function generateReportNow(){
   var type = document.getElementById('rpType').value, format = document.getElementById('rpFormat').value;
   var start = document.getElementById('rpStart').value, end = document.getElementById('rpEnd').value;
   call('generateReport', STATE.token, type, format, start, end).then(function(r){
-    downloadBase64File(r.base64, r.filename, r.mimeType);
-    document.getElementById('rpResult').innerHTML = 'File "'+esc(r.filename)+'" sedang diunduh ke perangkat Anda...';
-    toast('SUCCESS','Report berhasil dibuat & diunduh ke perangkat.');
+    return deliverReportFile_(r).then(function(){
+      document.getElementById('rpResult').innerHTML = 'File "'+esc(r.filename)+'" sedang diunduh ke perangkat Anda...';
+      toast('SUCCESS','Report berhasil dibuat & diunduh ke perangkat.');
+    });
   });
 }
 
