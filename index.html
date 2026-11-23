@@ -256,7 +256,9 @@ table.tbl tr:hover td{background:#fafbff;}
 
 @media(max-width:820px){
   .sidebar{position:fixed; top:0; bottom:0; left:0; transform:translateX(-100%); z-index:200;}
-  .sidebar.open{transform:translateX(0);}
+  .sidebar.open{transform:translateX(0); box-shadow:6px 0 24px rgba(0,0,0,.28);}
+  .sidebar-backdrop{display:none; position:fixed; inset:0; z-index:190; background:rgba(15,23,42,.45); -webkit-tap-highlight-color:transparent;}
+  body.sidebar-open .sidebar-backdrop{display:block;}
   .topbar .menuBtn{display:block;}
   .modal{width:94vw;}
 }
@@ -409,6 +411,7 @@ html[data-theme="dark"] .shift-row-dirty{background:rgba(255,193,7,0.08);}
 
 <div id="app">
 <div class="shell">
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
   <div class="sidebar" id="sidebar">
     <div class="brand" id="sidebarBrand">Wonderland OMS<small id="brandCompany">Operation Management</small></div>
     <div class="nav" id="navContainer"></div>
@@ -751,7 +754,25 @@ function esc(str){
 function badge(status){ return '<span class="badge '+esc(status)+'">'+esc(status)+'</span>'; }
 function fmtMoney(n){ n = Number(n)||0; return 'Rp ' + n.toLocaleString('id-ID'); }
 
-function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); }
+function setSidebar_(open){
+  document.getElementById('sidebar').classList.toggle('open', open);
+  document.body.classList.toggle('sidebar-open', open);
+}
+function toggleSidebar(){ setSidebar_(!document.getElementById('sidebar').classList.contains('open')); }
+function closeSidebar(){ setSidebar_(false); }
+// Menu tertutup otomatis: tap di luar menu (backdrop), tombol Esc, geser ke kiri, atau layar dilebarkan ke desktop.
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeSidebar(); });
+window.addEventListener('resize', function(){ if(window.innerWidth > 820) closeSidebar(); });
+(function(){
+  var x0 = null, y0 = null;
+  document.addEventListener('touchstart', function(e){ var t = e.touches[0]; x0 = t.clientX; y0 = t.clientY; }, { passive: true });
+  document.addEventListener('touchend', function(e){
+    if(x0 === null || !document.body.classList.contains('sidebar-open')) { x0 = null; return; }
+    var t = e.changedTouches[0];
+    if(x0 - t.clientX > 60 && Math.abs(t.clientY - y0) < 50) closeSidebar();
+    x0 = null;
+  }, { passive: true });
+})();
 
 /** Mobile-only overflow menu (Sinkronkan / theme buttons) so the topbar never overflows and Logout stays reachable on small screens. */
 function toggleTopbarMore(){ document.getElementById('topbarMorePanel').classList.toggle('open'); }
@@ -1001,7 +1022,7 @@ function navigate(sectionId){
   document.querySelectorAll('.navitem').forEach(function(n){ n.classList.toggle('active', n.getAttribute('data-id') === sectionId); });
   highlightBottomNav_(sectionId);
   document.getElementById('topbarTitle').textContent = SECTION_TITLE[sectionId] || sectionId;
-  document.getElementById('sidebar').classList.remove('open');
+  closeSidebar();
   var content = document.getElementById('content');
   content.innerHTML = '<div class="empty-state">Memuat...</div>';
   try {

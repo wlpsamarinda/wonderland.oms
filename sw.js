@@ -8,7 +8,7 @@
  * - CDN (xlsx) di-cache runtime agar fitur Import Excel tetap jalan.
  * Bump CACHE_NAME setiap kali ada update file agar HP user mendapat versi baru.
  *************************************************************************************************/
-var CACHE_NAME = 'wonderland-pwa-v6';
+var CACHE_NAME = 'wonderland-pwa-v7';
 var APP_SHELL = [
   './',
   './index.html',
